@@ -1,0 +1,40 @@
+[package]
+name = "bandmate-studio"
+version = "0.1.0"
+description = "Modern replacement for JoeCo's BM Loader companion app."
+authors = ["Brigades"]
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "bandmate_studio_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.0", features = [] }
+
+[dependencies]
+tauri = { version = "2.1", features = [] }
+tauri-plugin-dialog = "2.0"
+tauri-plugin-fs = "2.0"
+tauri-plugin-shell = "2.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Phase-1 use: WAV header probing (channel count, sample rate, length).
+hound = "3.5"
+
+# Phase-6 use: enumerate mounted USB drives.
+sysinfo = "0.32"
+
+[features]
+# This feature is used by Tauri to identify production builds.
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
+[profile.release]
+panic = "abort"
+codegen-units = 1
+lto = true
+opt-level = "s"
+strip = true

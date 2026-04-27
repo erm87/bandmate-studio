@@ -1,0 +1,23 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Tauri webview tweaks: disable text selection on chrome elements,
+   keep it on user content. */
+:root {
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+input,
+textarea,
+[contenteditable="true"],
+.user-text {
+  -webkit-user-select: text;
+  user-select: text;
+}
+
+/* Hide the default focus ring on click (keyboard focus still shows). */
+:focus:not(:focus-visible) {
+  outline: none;
+}
