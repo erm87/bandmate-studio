@@ -41,7 +41,9 @@ The BandMate scans `bm_media/bm_sources/` on the USB root and presents whatever 
 
 Plain ASCII text, **one channel name per line**, starting from channel 1.
 
-**Important:** observed line endings are **CRLF** (Windows-style `\r\n`). The BandMate runs Linux but the BM Loader was likely authored on Windows. We should preserve this convention to stay drop-in compatible — write CRLF on save.
+**Line endings vary:** the JoeCo-shipped stock track maps (`default_tm.jcm`, `stems_tm.jcm`) use **CRLF** with no trailing newline. User-edited files (e.g., Eric's `erictest_tm.jcm` written by BM Loader on Mac) use **LF** with a trailing newline. The BandMate accepts both. On read we accept either; on write we emit CRLF without trailing newline (matches stock JoeCo convention; safe choice since we know the BandMate accepts CRLF on production hardware).
+
+**Channel slots:** track maps always describe 25 slots (24 audio + the MIDI label as the last entry). Unused channels are stored as **empty lines**, preserving slot positions. Eric's `erictest_tm.jcm`, for instance, has 8 named audio channels followed by 16 empty lines and `Kemper` as the 25th slot.
 
 Example (`default_tm.jcm` from `bm_loader.app/Contents/Resources/TrackMaps/`):
 
@@ -128,7 +130,18 @@ Schema:
 </song>
 ```
 
-**MIDI tracks** are also represented as `<file>` entries — the filename ends in `.mid` instead of `.wav`, and the channel index for MIDI is conventionally treated as the last entry (the row labeled `MID` / `MIDI` in BM Loader's UI). The BandMate routes `.mid` files to its MIDI OUT port (via `mC.midioutbuf` in firmware).
+**MIDI tracks** are stored in a SEPARATE element type, not as `<file>`:
+
+```xml
+<midi_file>
+    <filename>kemper_strange v2.mid</filename>
+    <ch>24</ch>
+</midi_file>
+```
+
+Schema: `<filename>` + `<ch>` only (no `<lvl>`, `<pan>`, or `<mute>` — those don't apply to MIDI). The `<ch>` is 24 by convention (the 25th slot, after the 24 audio channels). The BandMate routes `<midi_file>` content to its MIDI OUT port (via `mC.midioutbuf` in firmware).
+
+A song may contain at most one `<midi_file>` element. If present, it appears AFTER all `<file>` elements in the canonical write order.
 
 **Hard rules from the manual:**
 - All audio files **must be mono WAV** at the song's `<srate>`. Stereo files are rejected by BandMate at load. BM Loader is supposed to highlight stereo source files in red — we should preserve that.

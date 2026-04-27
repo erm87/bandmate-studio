@@ -1,0 +1,64 @@
+<song>
+    <srate>48000</srate>
+    <length>9699328</length>
+    <file>
+        <filename>Time Code_buffy.wav</filename>
+        <ch>0</ch>
+        <lvl>1.0</lvl>
+        <pan>0.5</pan>
+        <mute>1.0</mute>
+    </file>
+    <file>
+        <filename>ClickCues_buffy.wav</filename>
+        <ch>1</ch>
+        <lvl>1.0</lvl>
+        <pan>0.5</pan>
+        <mute>1.0</mute>
+    </file>
+    <file>
+        <filename>Ref L_buffy.wav</filename>
+        <ch>2</ch>
+        <lvl>1.0</lvl>
+        <pan>0.5</pan>
+        <mute>1.0</mute>
+    </file>
+    <file>
+        <filename>Ref R_buffy.wav</filename>
+        <ch>3</ch>
+        <lvl>1.0</lvl>
+        <pan>0.5</pan>
+        <mute>1.0</mute>
+    </file>
+    <file>
+        <filename>Guitars_buffy.wav</filename>
+        <ch>4</ch>
+        <lvl>1.0</lvl>
+        <pan>0.5</pan>
+        <mute>1.0</mute>
+    </file>
+    <file>
+        <filename>SynthsSamplesPerc_buffy-v1.1.wav</filename>
+        <ch>5</ch>
+        <lvl>1.0</lvl>
+        <pan>0.5</pan>
+        <mute>1.0</mute>
+    </file>
+    <file>
+        <filename>Subs808s_buffy.wav</filename>
+        <ch>6</ch>
+        <lvl>1.0</lvl>
+        <pan>0.5</pan>
+        <mute>1.0</mute>
+    </file>
+    <file>
+        <filename>Vox_buffy.wav</filename>
+        <ch>7</ch>
+        <lvl>1.0</lvl>
+        <pan>0.5</pan>
+        <mute>1.0</mute>
+    </file>
+    <midi_file>
+        <filename>kemper_buffy v3.mid</filename>
+        <ch>24</ch>
+    </midi_file>
+</song>
