@@ -13,6 +13,7 @@
  */
 
 import { useAppState } from "../state/AppState";
+import { PlaylistEditor } from "./PlaylistEditor";
 import { SongEditor } from "./SongEditor";
 import { WelcomeStub } from "./WelcomeStub";
 
@@ -28,13 +29,9 @@ export function EditorPane() {
       // which keeps the load/cache logic in <SongEditor /> simple.
       return <SongEditor key={sel.jcsPath} jcsPath={sel.jcsPath} />;
     case "playlist":
-      return (
-        <ComingSoonStub
-          title="Playlist editor"
-          phase="Phase 4"
-          path={sel.path}
-        />
-      );
+      // Same `key` trick — remount on selection change so PlaylistEditor's
+      // loader runs fresh per .jcp.
+      return <PlaylistEditor key={sel.path} jcpPath={sel.path} />;
     case "trackMap":
       return (
         <ComingSoonStub

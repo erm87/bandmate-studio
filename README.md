@@ -16,7 +16,7 @@ JoeCo's stock BM Loader is a Python 3.12 + PySimpleGUI v2 desktop app that's gro
 - No `dot_clean` integration on macOS (Eric has to remember to run it manually after every USB write)
 - No bulk editing across songs
 
-JoeCo's source isn't available, and the bundled bytecode resists clean decompilation under Python 3.12 (`pycdc` bails at the module level), so a true patch-the-existing-app workflow isn't feasible the way the BandMate firmware patches were. Building a fresh app on top of the public file formats is the more tractable path — and gives us a UI we'd actually enjoy using.
+JoeCo's source isn't available, but a patched build of `pycdc` recovered ~88% of the app's functions cleanly — see [decompiled/README.md](./decompiled/README.md). The recovered `playlistparse.py` (notably `Song.loadSong`/`saveSong` and `PlayList.loadPlaylist`/`savePlaylist`) is the authoritative reference for the file-format SPEC. We're still building a fresh app rather than patching the original — the recovered source is enough to validate behavior, but the UI is dated enough that a rewrite gives us more leverage than a patch.
 
 ## Status
 

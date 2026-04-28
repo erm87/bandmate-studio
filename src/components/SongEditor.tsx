@@ -26,7 +26,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ask } from "@tauri-apps/plugin-dialog";
+import { ask, message } from "@tauri-apps/plugin-dialog";
 import {
   parseSong,
   parseTrackMap,
@@ -40,7 +40,9 @@ import { TRACK_MAP_CHANNEL_COUNT, MIDI_CHANNEL_INDEX } from "../codec";
 import {
   copyIntoFolder,
   listAudioFiles,
+  readSongSidecar,
   readTextFile,
+  writeSongSidecar,
   writeTextFile,
 } from "../fs/workingFolder";
 import type { AudioFileInfo } from "../fs/types";
@@ -82,6 +84,104 @@ interface EditorState {
 /** Cap on how far back undo / forward redo can walk. */
 const HISTORY_LIMIT = 50;
 
+/** Maximum audio channel index (exclusive bound for cascade scans). */
+const AUDIO_CHANNEL_MAX = MIDI_CHANNEL_INDEX; // 24
+
+/**
+ * Compute a cascade shift to make room at `target` by sliding the
+ * occupied block of channels in `direction` toward the nearest empty
+ * slot.
+ *
+ * Returns:
+ *   - `null` if no empty slot exists in the requested direction
+ *     (caller should refuse the drop and surface an alert).
+ *   - Otherwise, the new audio + pending-copies maps with target now
+ *     empty, ready for the caller to place a file there.
+ *
+ * `treatAsEmpty` is the source channel for `channel-move` drops —
+ * its slot is about to be vacated, so the cascade can use it as an
+ * empty slot. Pass `undefined` for source-file drops (no source).
+ *
+ * Algorithm: scan from `target ± 1` in `direction` until an empty
+ * channel is found, then shift every occupied channel in the contiguous
+ * block between target and that empty slot by one toward the empty
+ * one. If the block reaches a hard boundary (channel 0 or 23 for
+ * audio) without an empty slot, return null.
+ */
+function cascadeShift(
+  audioFiles: SongAudioFile[],
+  pendingCopies: Map<number, PendingCopy>,
+  target: number,
+  direction: -1 | 1,
+  treatAsEmpty?: number,
+): {
+  audioFiles: SongAudioFile[];
+  pendingCopies: Map<number, PendingCopy>;
+} | null {
+  const occupied = new Set(audioFiles.map((f) => f.channel));
+  if (treatAsEmpty !== undefined) occupied.delete(treatAsEmpty);
+
+  // Find the first empty channel in `direction` from `target`.
+  let empty = -1;
+  if (direction === -1) {
+    for (let i = target - 1; i >= 0; i--) {
+      if (!occupied.has(i)) {
+        empty = i;
+        break;
+      }
+    }
+  } else {
+    for (let i = target + 1; i < AUDIO_CHANNEL_MAX; i++) {
+      if (!occupied.has(i)) {
+        empty = i;
+        break;
+      }
+    }
+  }
+  if (empty === -1) return null;
+
+  // Build the cascade range. Channels in this range slide by `direction`
+  // toward the empty slot, ending at slots [empty, target ∓ 1] and
+  // leaving target itself empty for the caller.
+  //
+  // direction = -1 (shiftUp):
+  //   range = [empty + 1, target]; each channel becomes channel - 1
+  // direction = +1 (shiftDown):
+  //   range = [target, empty - 1]; each channel becomes channel + 1
+  const inRange = (ch: number) =>
+    direction === -1
+      ? ch >= empty + 1 && ch <= target
+      : ch >= target && ch <= empty - 1;
+
+  const newAudio = audioFiles
+    .filter((f) => f.channel !== treatAsEmpty)
+    .map((f) =>
+      inRange(f.channel) ? { ...f, channel: f.channel + direction } : f,
+    );
+
+  const newPending = new Map<number, PendingCopy>();
+  for (const [ch, copy] of pendingCopies) {
+    if (ch === treatAsEmpty) continue; // caller re-keys this if needed
+    const newCh = inRange(ch) ? ch + direction : ch;
+    newPending.set(newCh, copy);
+  }
+
+  return { audioFiles: newAudio, pendingCopies: newPending };
+}
+
+/** Translates a DropMode shift to a cascade `direction` (or null for replace). */
+function shiftDirection(mode: "replace" | "shiftUp" | "shiftDown"): -1 | 1 | null {
+  if (mode === "shiftUp") return -1;
+  if (mode === "shiftDown") return 1;
+  return null;
+}
+
+/** User-facing alert text when a cascade has no empty slot to land in. */
+const NO_EMPTY_CHANNEL_MESSAGE =
+  "No empty channels available in that direction.\n\n" +
+  "Drop the file directly on the channel row to replace the existing one, " +
+  "or remove an existing file elsewhere in the list first to make room.";
+
 const EMPTY_EDITOR: EditorState = {
   past: [],
   current: null,
@@ -104,6 +204,13 @@ export function SongEditor({ jcsPath }: Props) {
    * file and to surface per-channel rate-mismatch warnings in the grid.
    */
   const [folderFiles, setFolderFiles] = useState<AudioFileInfo[]>([]);
+  /**
+   * External source folder for unimported WAVs. Loaded from the song's
+   * `.bandmate-studio.json` sidecar on mount, persisted on change.
+   * `null` = no external source set; the source pane shows the song
+   * folder instead.
+   */
+  const [sourceFolder, setSourceFolder] = useState<string | null>(null);
 
   const draftSong = editor.current?.song ?? null;
 
@@ -186,6 +293,7 @@ export function SongEditor({ jcsPath }: Props) {
     setEditor(EMPTY_EDITOR);
     setLoadError(null);
     setSaveError(null);
+    setSourceFolder(null);
     (async () => {
       try {
         const text = await readTextFile(jcsPath);
@@ -201,6 +309,15 @@ export function SongEditor({ jcsPath }: Props) {
           future: [],
           baseline: initialSnapshot,
         });
+        // Sidecar is best-effort — never fail the editor open over it.
+        try {
+          const sidecar = await readSongSidecar(songFolder);
+          if (!cancelled && typeof sidecar.sourceFolder === "string") {
+            setSourceFolder(sidecar.sourceFolder);
+          }
+        } catch {
+          /* swallow — older songs have no sidecar */
+        }
       } catch (e) {
         if (!cancelled) {
           setLoadError(e instanceof Error ? e.message : String(e));
@@ -210,7 +327,7 @@ export function SongEditor({ jcsPath }: Props) {
     return () => {
       cancelled = true;
     };
-  }, [jcsPath]);
+  }, [jcsPath, songFolder]);
 
   // ---- Probe the song folder ---------------------------------------------
   // Stored on state because both the longest-file detection AND the
@@ -322,8 +439,21 @@ export function SongEditor({ jcsPath }: Props) {
   );
 
   const handleSelectSourceFile = useCallback(
-    (file: AudioFileInfo) => {
-      const channelSel = state.channelSelection;
+    /**
+     * Assign a source file to a channel.
+     *
+     * - For click-to-assign (the default), `channelOverride` is
+     *   undefined and we use the highlighted channel from AppState.
+     * - For drag-drop, the caller passes the explicit channel that
+     *   the file was dropped on; `mode` controls how an existing
+     *   assignment at the target is handled (see the DropMode docs).
+     */
+    (
+      file: AudioFileInfo,
+      channelOverride?: number,
+      mode: "replace" | "shiftUp" | "shiftDown" = "replace",
+    ) => {
+      const channelSel = channelOverride ?? state.channelSelection;
 
       if (file.kind === "wav") {
         const isStereo = (file.wavInfo?.channels ?? 1) > 1;
@@ -337,8 +467,30 @@ export function SongEditor({ jcsPath }: Props) {
 
       const isInSongFolder = file.path.startsWith(`${songFolder}/`);
 
+      // Resolve cascade up front so we can refuse the drop with an
+      // alert if no empty slot exists in the shift direction. We
+      // can't do this inside applyEdit because applyEdit can't be
+      // async (the alert is async).
+      const direction = shiftDirection(mode);
+      if (file.kind === "wav" && direction !== null) {
+        const cascade = cascadeShift(
+          editor.current?.song.audioFiles ?? [],
+          editor.current?.pendingCopies ?? new Map(),
+          targetChannel,
+          direction,
+        );
+        if (cascade === null) {
+          void message(NO_EMPTY_CHANNEL_MESSAGE, {
+            title: "Can't shift",
+            kind: "warning",
+          });
+          return;
+        }
+      }
+
       applyEdit((snap) => {
         let nextSong: Song;
+        let nextCopies = new Map(snap.pendingCopies);
         if (file.kind === "mid") {
           const midi: SongMidiFile = {
             filename: file.filename,
@@ -346,35 +498,168 @@ export function SongEditor({ jcsPath }: Props) {
           };
           nextSong = { ...snap.song, midiFile: midi };
         } else {
-          const next: SongAudioFile = {
+          let audioFiles = snap.song.audioFiles;
+          if (direction !== null) {
+            // Cascade: shift the contiguous block in `direction` to
+            // open up `target`. We re-run cascade against the latest
+            // snapshot rather than reusing the precheck result, since
+            // applyEdit is the source of truth for state transitions.
+            const cascade = cascadeShift(
+              snap.song.audioFiles,
+              snap.pendingCopies,
+              targetChannel,
+              direction,
+            );
+            if (cascade) {
+              audioFiles = cascade.audioFiles;
+              nextCopies = cascade.pendingCopies;
+            }
+            // else (shouldn't happen — we precheck) → fall through to replace.
+          }
+          const newAudio: SongAudioFile = {
             filename: file.filename,
             channel: targetChannel,
             level: 1.0,
             pan: 0.5,
             mute: 1.0,
           };
-          const remaining = snap.song.audioFiles.filter(
+          const remaining = audioFiles.filter(
             (f) => f.channel !== targetChannel,
           );
-          const reassigned = [...remaining, next].sort(
+          const reassigned = [...remaining, newAudio].sort(
             (a, b) => a.channel - b.channel,
           );
           nextSong = { ...snap.song, audioFiles: reassigned };
         }
-        const nextCopies = new Map(snap.pendingCopies);
-        if (isInSongFolder) {
-          nextCopies.delete(targetChannel);
-        } else {
-          nextCopies.set(targetChannel, {
-            sourcePath: file.path,
-            filename: file.filename,
-            sampleRate: file.wavInfo?.sampleRate ?? 0,
-          });
+        if (file.kind === "wav") {
+          if (isInSongFolder) {
+            nextCopies.delete(targetChannel);
+          } else {
+            nextCopies.set(targetChannel, {
+              sourcePath: file.path,
+              filename: file.filename,
+              sampleRate: file.wavInfo?.sampleRate ?? 0,
+            });
+          }
         }
         return { song: nextSong, pendingCopies: nextCopies };
       });
     },
-    [applyEdit, songFolder, state.channelSelection],
+    [applyEdit, editor, songFolder, state.channelSelection],
+  );
+
+  /**
+   * Move an existing channel assignment to another channel (drag-drop
+   * reorganization). The audio file's level / pan / mute travel with
+   * it.
+   *
+   * `mode` controls how an existing file at the target is handled:
+   *
+   *   - `replace` (drop in row middle): existing target file is
+   *     discarded — matches drop-replaces semantics from most DAWs.
+   *   - `shiftUp` (drop on row's top edge): existing target moves to
+   *     `to - 1` if that slot is empty + in bounds; otherwise falls
+   *     back to replace.
+   *   - `shiftDown` (drop on row's bottom edge): same with `to + 1`.
+   *
+   * Pending copies (files queued for save-time copy) move with the
+   * assignment too, so the queue stays consistent.
+   *
+   * MIDI's slot is fixed at index 24, so we no-op any move involving
+   * the MIDI slot — there's nowhere else MIDI could go.
+   */
+  const handleMoveChannel = useCallback(
+    (from: number, to: number, mode: "replace" | "shiftUp" | "shiftDown") => {
+      if (from === to) return;
+      if (from === MIDI_CHANNEL_INDEX || to === MIDI_CHANNEL_INDEX) return;
+      const fromFile = editor.current?.song.audioFiles.find(
+        (f) => f.channel === from,
+      );
+      if (!fromFile) return;
+
+      // Pre-check cascade feasibility for shift modes. The source
+      // channel counts as empty (it's about to be vacated), so the
+      // cascade has one extra empty slot to work with.
+      const direction = shiftDirection(mode);
+      if (direction !== null) {
+        const cascade = cascadeShift(
+          editor.current?.song.audioFiles ?? [],
+          editor.current?.pendingCopies ?? new Map(),
+          to,
+          direction,
+          /* treatAsEmpty */ from,
+        );
+        if (cascade === null) {
+          void message(NO_EMPTY_CHANNEL_MESSAGE, {
+            title: "Can't shift",
+            kind: "warning",
+          });
+          return;
+        }
+      }
+
+      applyEdit((snap) => {
+        let audioFiles = snap.song.audioFiles;
+        let nextCopies = new Map(snap.pendingCopies);
+        if (direction !== null) {
+          const cascade = cascadeShift(
+            snap.song.audioFiles,
+            snap.pendingCopies,
+            to,
+            direction,
+            /* treatAsEmpty */ from,
+          );
+          if (cascade) {
+            audioFiles = cascade.audioFiles;
+            nextCopies = cascade.pendingCopies;
+            // cascadeShift dropped any pending copy keyed by `from`
+            // (it's about to be re-keyed below).
+          } else {
+            // Shouldn't happen — we precheck. Fall back to replace
+            // and remove the source explicitly.
+            audioFiles = audioFiles.filter((f) => f.channel !== from);
+            nextCopies.delete(from);
+          }
+        } else {
+          // Replace mode: drop the source file from the array now;
+          // the target's existing file is filtered out below.
+          audioFiles = audioFiles.filter((f) => f.channel !== from);
+          nextCopies.delete(from);
+        }
+        // Place the moved file at `to`, replacing anything still there.
+        const remaining = audioFiles.filter((f) => f.channel !== to);
+        const moved = { ...fromFile, channel: to };
+        const nextAudio = [...remaining, moved].sort(
+          (a, b) => a.channel - b.channel,
+        );
+        // Re-key the source's pending copy from `from` to `to`.
+        const sourceCopy = snap.pendingCopies.get(from);
+        nextCopies.delete(to); // drop stale entry at target if any
+        if (sourceCopy) nextCopies.set(to, sourceCopy);
+        return {
+          song: { ...snap.song, audioFiles: nextAudio },
+          pendingCopies: nextCopies,
+        };
+      });
+    },
+    [applyEdit, editor],
+  );
+
+  /**
+   * Update the per-song source folder — both in local state (for the
+   * source pane) and in the on-disk sidecar (so it persists). Failures
+   * are surfaced via saveError; we don't want a silent persistence
+   * miss but it shouldn't block the editor.
+   */
+  const handleChangeSourceFolder = useCallback(
+    (path: string | null) => {
+      setSourceFolder(path);
+      void writeSongSidecar(songFolder, { sourceFolder: path }).catch((e) => {
+        const msg = e instanceof Error ? e.message : String(e);
+        setSaveError(`Source folder didn't persist: ${msg}`);
+      });
+    },
+    [songFolder],
   );
 
   const handleClearChannel = useCallback(() => {
@@ -605,12 +890,19 @@ export function SongEditor({ jcsPath }: Props) {
           channelSampleRates={channelSampleRates}
           selectedChannel={state.channelSelection}
           onSelectChannel={handleSelectChannel}
+          onDropFile={(file, channel, mode) =>
+            handleSelectSourceFile(file, channel, mode)
+          }
+          onMoveChannel={handleMoveChannel}
         />
         <SourceFilesPane
           songFolder={songFolder}
+          sourceFolder={sourceFolder}
           songSampleRate={draftSong.sampleRate}
           channelSelected={state.channelSelection !== null}
           onSelectFile={handleSelectSourceFile}
+          onChangeSourceFolder={(path) => handleChangeSourceFolder(path)}
+          onClearSourceFolder={() => handleChangeSourceFolder(null)}
         />
       </div>
     </main>

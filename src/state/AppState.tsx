@@ -57,6 +57,14 @@ export interface AppState {
    * song = no carryover highlight).
    */
   channelSelection: number | null;
+  /**
+   * Currently-selected song row inside the playlist editor. Same
+   * rationale as `channelSelection` — lifted into AppState so the
+   * top-level ESC handler can clear it before falling back to
+   * clearing the sidebar selection. Used by PlaylistEditor to show
+   * inline ↑ ↓ reorder buttons on the highlighted row.
+   */
+  playlistRowSelection: number | null;
 }
 
 const EMPTY_SCAN: ScanResult = { songs: [], playlists: [], trackMaps: [] };
@@ -68,6 +76,7 @@ const INITIAL_STATE: AppState = {
   error: null,
   selection: null,
   channelSelection: null,
+  playlistRowSelection: null,
 };
 
 // ---------------------------------------------------------------------------
@@ -81,7 +90,8 @@ export type AppAction =
   | { type: "clear_working_folder" }
   | { type: "select"; selection: Selection }
   | { type: "clear_selection" }
-  | { type: "select_channel"; channel: number | null };
+  | { type: "select_channel"; channel: number | null }
+  | { type: "select_playlist_row"; row: number | null };
 
 function reducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
@@ -133,17 +143,25 @@ function reducer(state: AppState, action: AppAction): AppState {
     case "clear_working_folder":
       return { ...INITIAL_STATE };
     case "select":
-      // Reset channel selection when sidebar selection changes —
-      // the new editor opens fresh.
+      // Reset both editor sub-selections when sidebar selection
+      // changes — the new editor opens fresh, no carryover highlight.
       return {
         ...state,
         selection: action.selection,
         channelSelection: null,
+        playlistRowSelection: null,
       };
     case "clear_selection":
-      return { ...state, selection: null, channelSelection: null };
+      return {
+        ...state,
+        selection: null,
+        channelSelection: null,
+        playlistRowSelection: null,
+      };
     case "select_channel":
       return { ...state, channelSelection: action.channel };
+    case "select_playlist_row":
+      return { ...state, playlistRowSelection: action.row };
     default: {
       // Exhaustiveness check — TS will error if we add an action and
       // forget to handle it here.

@@ -94,3 +94,217 @@ export async function copyIntoFolder(
 export async function fileExists(path: string): Promise<boolean> {
   return invoke<boolean>("file_exists", { path });
 }
+
+// ---------------------------------------------------------------------------
+// Phase 3f — New Song wizard
+// ---------------------------------------------------------------------------
+
+/** Mirrors the Rust `CreatedSong` struct. */
+export interface CreatedSong {
+  /** Absolute path of the new song folder. */
+  folderPath: string;
+  /** Absolute path the empty .jcs should be written to. */
+  jcsPath: string;
+}
+
+/**
+ * Create a new empty song folder under `<workingFolder>/bm_media/bm_sources/<songName>/`.
+ *
+ * Does NOT write the .jcs — caller is expected to follow up with a
+ * `writeTextFile(result.jcsPath, writeSong(emptySong))` call. Keeping
+ * file generation on the TS side means the codec library remains the
+ * single authority on .jcs format.
+ *
+ * Throws if the folder already exists, the name is invalid, or the
+ * working folder is missing.
+ */
+export async function createSong(
+  workingFolder: string,
+  songName: string,
+): Promise<CreatedSong> {
+  return invoke<CreatedSong>("create_song", { workingFolder, songName });
+}
+
+/**
+ * Per-song sidecar: `<song-folder>/.bandmate-studio.json`. Used to
+ * stash BandMate Studio-only metadata (currently the external source
+ * folder for the source-files pane). The dotfile prefix means the
+ * BandMate hardware filters it out, and the file lives next to the
+ * .jcs so it travels when the working folder is moved.
+ */
+export interface SongSidecar {
+  /** Where the user picked their unimported WAVs from, or null/undefined. */
+  sourceFolder?: string | null;
+}
+
+/**
+ * Read the sidecar JSON for a song. Returns an empty object if there
+ * is no sidecar (the common case for songs created by JoeCo's BM
+ * Loader before BandMate Studio existed).
+ */
+export async function readSongSidecar(songFolder: string): Promise<SongSidecar> {
+  const raw = await invoke<string | null>("read_song_sidecar", { songFolder });
+  if (raw === null) return {};
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (parsed && typeof parsed === "object") {
+      return parsed as SongSidecar;
+    }
+    return {};
+  } catch {
+    // Corrupt sidecar → behave as if absent. Don't surface this to the
+    // user — they probably didn't write it themselves.
+    return {};
+  }
+}
+
+/** Persist sidecar JSON for a song. Overwrites prior contents. */
+export async function writeSongSidecar(
+  songFolder: string,
+  sidecar: SongSidecar,
+): Promise<void> {
+  await invoke<void>("write_song_sidecar", {
+    songFolder,
+    content: JSON.stringify(sidecar, null, 2),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4 — New Playlist wizard
+// ---------------------------------------------------------------------------
+
+/** Mirrors the Rust `CreatedPlaylist` struct. */
+export interface CreatedPlaylist {
+  /** Absolute path the empty .jcp should be written to. */
+  jcpPath: string;
+}
+
+/**
+ * Reserve a `.jcp` filename under `<workingFolder>/bm_media/`. Returns
+ * the path the caller should `writeTextFile` the empty playlist into.
+ *
+ * Does NOT write the .jcp — caller follows up with
+ * `writeTextFile(result.jcpPath, writePlaylist(emptyPlaylist))`.
+ *
+ * Throws if the file already exists, the name is invalid, or the
+ * working folder is missing.
+ */
+export async function createPlaylist(
+  workingFolder: string,
+  name: string,
+): Promise<CreatedPlaylist> {
+  return invoke<CreatedPlaylist>("create_playlist", { workingFolder, name });
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4 — Delete + Duplicate
+// ---------------------------------------------------------------------------
+
+/** Recursively delete a song folder + all contents. */
+export async function deleteSong(
+  workingFolder: string,
+  songFolder: string,
+): Promise<void> {
+  await invoke<void>("delete_song", { workingFolder, songFolder });
+}
+
+/** Delete a single .jcp playlist file. */
+export async function deletePlaylist(
+  workingFolder: string,
+  jcpPath: string,
+): Promise<void> {
+  await invoke<void>("delete_playlist", { workingFolder, jcpPath });
+}
+
+/** Delete a single .jcm track-map file. */
+export async function deleteTrackMap(
+  workingFolder: string,
+  jcmPath: string,
+): Promise<void> {
+  await invoke<void>("delete_track_map", { workingFolder, jcmPath });
+}
+
+/**
+ * Duplicate a song: copies the folder + all WAVs + .jcs, renaming the
+ * inner .jcs to match `newName`.
+ */
+export async function duplicateSong(
+  workingFolder: string,
+  sourceName: string,
+  newName: string,
+): Promise<CreatedSong> {
+  return invoke<CreatedSong>("duplicate_song", {
+    workingFolder,
+    sourceName,
+    newName,
+  });
+}
+
+/** Duplicate a .jcp playlist file under a new name. */
+export async function duplicatePlaylist(
+  workingFolder: string,
+  sourcePath: string,
+  newName: string,
+): Promise<CreatedPlaylist> {
+  return invoke<CreatedPlaylist>("duplicate_playlist", {
+    workingFolder,
+    sourcePath,
+    newName,
+  });
+}
+
+/** Duplicate a .jcm track-map file under a new name. Returns the new path. */
+export async function duplicateTrackMap(
+  workingFolder: string,
+  sourcePath: string,
+  newName: string,
+): Promise<string> {
+  return invoke<string>("duplicate_track_map", {
+    workingFolder,
+    sourcePath,
+    newName,
+  });
+}
+
+/**
+ * Rename a song's folder + its inner .jcs to match the new name.
+ * Cross-reference cleanup (updating `<song_name>` in playlists)
+ * happens on the TS side BEFORE calling this — see Sidebar.handleRenameSong.
+ */
+export async function renameSong(
+  workingFolder: string,
+  oldName: string,
+  newName: string,
+): Promise<CreatedSong> {
+  return invoke<CreatedSong>("rename_song", { workingFolder, oldName, newName });
+}
+
+/**
+ * Rename a .jcp file. Caller should update `<playlist_display_name>`
+ * inside the file first if they want the on-screen name on the
+ * BandMate to match.
+ */
+export async function renamePlaylist(
+  workingFolder: string,
+  oldPath: string,
+  newName: string,
+): Promise<CreatedPlaylist> {
+  return invoke<CreatedPlaylist>("rename_playlist", {
+    workingFolder,
+    oldPath,
+    newName,
+  });
+}
+
+/** Rename a .jcm track-map file. Returns the new path. */
+export async function renameTrackMap(
+  workingFolder: string,
+  oldPath: string,
+  newName: string,
+): Promise<string> {
+  return invoke<string>("rename_track_map", {
+    workingFolder,
+    oldPath,
+    newName,
+  });
+}

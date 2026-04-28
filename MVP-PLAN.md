@@ -174,6 +174,67 @@ The "Download to USB Stick" workflow. Replaces the Uploader tab's first row.
 - **Song renaming** — currently the song name in the header is read-only.
   Renaming requires a folder rename + `.jcs` rename + updating any
   playlist `<song_name>` references. Doable, just needs careful handling.
+- **v0.2 UI craft pass — design system + JoeCo neon theme** — once
+  MVP features are functionally complete, do a comprehensive craft
+  pass:
+  1. **Design system foundation** — formalize tokens (colors, spacing,
+     typography, radii, shadows, motion, z-index) in tailwind.config.js
+     plus a written SPEC.
+  2. **Component library** — extract and standardize Button, IconButton,
+     Tag, Tabs, Modal, ContextMenu, Tooltip, FormField, etc. Document
+     props + states.
+  3. **JoeCo neon theme** — replace the current generic blue brand
+     with a palette inspired by the lit-up features on JoeCo hardware
+     (LED indicators, VU meters, illuminated buttons). Cues from
+     `logos/joeco-logo-neon-retina-flat-250718.png` and photos of the
+     hardware. Deep dark bgs + saturated neon accents, soft glow on
+     interactive elements.
+  4. **Light + dark mode** — both variants of the neon theme. Dark is
+     the natural fit for stage use; light for studio.
+  5. **Component audit** — sweep every screen and replace hand-rolled
+     styles with the system primitives.
+- **On-selected-row move/remove buttons in the Songs channel grid** —
+  mirror the playlist editor's pattern (Phase 4.6) where the selected
+  row exposes inline ↑ / ↓ / × buttons. Drives the existing
+  `handleMoveChannel` and `handleClearChannel` handlers; up/down on
+  channel rows map to swap-with-adjacent. Cascade-shift modes stay
+  drag-only.
+- **Cmd+Arrow shortcuts to move selected rows** — when a row is
+  selected in the song editor or playlist editor, ⌘↑ / ⌘↓ moves it
+  up / down by one. Hovering the on-row up/down/× buttons should
+  surface the shortcut in the tooltip (e.g. "Move up (⌘↑)",
+  "Remove (Delete)").
+- **Track metadata in channel-row tooltips + drag preview** — channel
+  rows hover-tooltip currently shows just the filename; extend to
+  include sample rate (kHz), mono/stereo, and length (m:ss). The
+  per-channel metadata cache already exists for rate-mismatch
+  flagging — extend it with channel count and duration. The
+  drag-image label (`setDragImageLabel`) for existing channel-row
+  drags should show the same enriched line ("filename · 44.1 kHz ·
+  mono · 3:21").
+- **JoeCo logo in app header** — replace the square blue placeholder
+  (white music note glyph) with the actual JoeCo logo from
+  `logos/joeco-logo-neon-retina-flat-250718.png`. The file is
+  rectangular, so the "BandMate Studio" title will shift slightly
+  right — that's fine. Consider swapping to the white variant
+  (`joeco-logo-white-retina-flat.png`) in dark mode if the neon
+  color clashes. Decide between bundling under `src/assets/` (Vite
+  import) vs. leaving in `/logos` as a Tauri static asset.
+- **Right-click "Open in Finder" on folder paths** — every folder-path
+  line in the UI (Working Folder bar, song folder header, source folder
+  header, etc.) gets a right-click menu with an "Open in Finder" action
+  (macOS) / "Open in Explorer" (Windows) / "Open in Files" (Linux).
+  Reuse the context-menu component built for Phase 4.9 sidebar actions.
+  Tauri's shell plugin can spawn `open` / `explorer` / `xdg-open`, or
+  use `tauri-plugin-opener`'s `revealItemInDir`.
+- **Unsaved-changes guard** — currently, if a song is dirty and the
+  user navigates away (clicks another sidebar row, ESC-clears
+  selection, switches to a playlist, etc.), the in-progress edits are
+  silently lost. Add a confirm dialog at any nav boundary that says
+  "You have unsaved changes" with Save / Discard / Cancel. Hook into
+  the AppState reducer's `select` / `clear_selection` paths and
+  intercept before the editor unmounts. Same logic should apply to
+  PlaylistEditor and TrackMapEditor once they have edit state.
 - **Undo History menu** — native macOS app menu "Edit" with an
   "Undo History" item that opens a panel listing the last N edits in
   the song editor's past stack. Lets the user jump back to a specific

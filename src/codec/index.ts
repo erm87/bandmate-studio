@@ -34,3 +34,52 @@ export {
   TRACK_MAP_CHANNEL_COUNT,
   MIDI_CHANNEL_INDEX,
 } from "./types";
+
+import type { Playlist, Song } from "./types";
+
+/**
+ * Build an empty `Song` with the given sample rate. Used by the New
+ * Song wizard before any files are assigned. `lengthSamples` is 0 —
+ * we recompute it on save from the longest assigned WAV.
+ *
+ * Round-tripping the result through `writeSong` then `parseSong`
+ * should be identity (modulo whitespace), so saving an untouched
+ * empty song is well-defined.
+ */
+export function createEmptySong(sampleRate: number): Song {
+  if (sampleRate !== 44100 && sampleRate !== 48000) {
+    throw new Error(
+      `Unsupported sample rate ${sampleRate}; expected 44100 or 48000.`,
+    );
+  }
+  return {
+    sampleRate,
+    lengthSamples: 0,
+    audioFiles: [],
+    // midiFile intentionally omitted (optional in the type).
+  };
+}
+
+/**
+ * Build an empty `Playlist`. Used by the New Playlist wizard before
+ * any songs are added. Caller supplies the display name (which
+ * doubles as the filename minus the extension), sample rate, and the
+ * track-map filename to embed in `<trackmap>`.
+ */
+export function createEmptyPlaylist(
+  displayName: string,
+  sampleRate: number,
+  trackMap: string,
+): Playlist {
+  if (sampleRate !== 44100 && sampleRate !== 48000) {
+    throw new Error(
+      `Unsupported sample rate ${sampleRate}; expected 44100 or 48000.`,
+    );
+  }
+  return {
+    displayName,
+    sampleRate,
+    trackMap,
+    songNames: [],
+  };
+}

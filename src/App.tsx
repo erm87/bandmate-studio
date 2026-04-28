@@ -47,15 +47,26 @@ function Shell() {
       ) {
         return;
       }
+      // ESC chain: editor sub-selections first (channel highlight in
+      // SongEditor, song-row highlight in PlaylistEditor), then the
+      // sidebar selection. Channel and playlist-row are mutually
+      // exclusive — at most one editor is mounted at a time.
       if (state.channelSelection !== null) {
         dispatch({ type: "select_channel", channel: null });
+      } else if (state.playlistRowSelection !== null) {
+        dispatch({ type: "select_playlist_row", row: null });
       } else if (state.selection !== null) {
         dispatch({ type: "clear_selection" });
       }
     };
     window.addEventListener("keydown", onKeydown);
     return () => window.removeEventListener("keydown", onKeydown);
-  }, [state.selection, state.channelSelection, dispatch]);
+  }, [
+    state.selection,
+    state.channelSelection,
+    state.playlistRowSelection,
+    dispatch,
+  ]);
 
   // Show empty state until the user has chosen a folder. We also fall
   // back to it if there's an error AND no scan results yet (e.g. the
