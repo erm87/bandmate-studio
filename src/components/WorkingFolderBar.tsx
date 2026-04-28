@@ -14,24 +14,46 @@
  * without any tooltip needed.
  */
 
+import { useState } from "react";
 import { useAppState } from "../state/AppState";
 import { cn } from "../lib/cn";
+import { revealInFileManager } from "../fs/workingFolder";
+import { ContextMenu, type OpenContextMenu } from "./ContextMenu";
+import { ExportToUsbDialog } from "./ExportToUsbDialog";
+import joecoLogoNeon from "../assets/joeco-logo-neon.png";
+import joecoLogoWhite from "../assets/joeco-logo-white.png";
 
 export function WorkingFolderBar() {
   const { state, chooseWorkingFolder, rescan } = useAppState();
   const path = state.workingFolder;
+  const [contextMenu, setContextMenu] = useState<OpenContextMenu | null>(null);
+  const [exportOpen, setExportOpen] = useState(false);
   if (!path) return null;
   const isLoading = state.status === "loading";
 
   return (
     <header className="flex items-center justify-between gap-4 border-b border-zinc-200 bg-white px-6 py-3 dark:border-zinc-800 dark:bg-zinc-950">
       <div className="flex min-w-0 items-center gap-3">
-        <div
-          className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-500 text-base text-white"
-          aria-hidden="true"
-        >
-          ♪
-        </div>
+        {/* JoeCo logo. The neon variant works on light backgrounds; the
+            white variant goes against dark mode. Tailwind's dark:
+            variant on the wrapper hides the inactive one. The native
+            aspect (166×57) gives a ~2.9:1 ratio; height-locked to 28px
+            so it sits comfortably alongside the title text without
+            inflating the header. */}
+        <picture>
+          <img
+            src={joecoLogoNeon}
+            alt="JoeCo"
+            className="block h-7 w-auto dark:hidden"
+            draggable={false}
+          />
+          <img
+            src={joecoLogoWhite}
+            alt="JoeCo"
+            className="hidden h-7 w-auto dark:block"
+            draggable={false}
+          />
+        </picture>
         <span className="font-semibold text-zinc-900 dark:text-zinc-100">
           BandMate Studio
         </span>
@@ -47,7 +69,22 @@ export function WorkingFolderBar() {
         >
           <RefreshIcon className={cn("h-4 w-4", isLoading && "animate-spin")} />
         </IconButton>
-        <WorkingFolderChip path={path} />
+        <WorkingFolderChip
+          path={path}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            setContextMenu({
+              position: { x: e.clientX, y: e.clientY },
+              items: [
+                {
+                  label: "Open in Finder",
+                  onClick: () => void revealInFileManager(path),
+                },
+              ],
+            });
+          }}
+        />
         <button
           type="button"
           onClick={() => {
@@ -57,7 +94,21 @@ export function WorkingFolderBar() {
         >
           Change
         </button>
+        <button
+          type="button"
+          onClick={() => setExportOpen(true)}
+          disabled={isLoading}
+          title="Copy bm_media/ onto a USB stick"
+          className="rounded-md bg-brand-500 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2 disabled:opacity-50 dark:focus-visible:ring-offset-zinc-950"
+        >
+          Export to USB
+        </button>
       </div>
+      <ContextMenu menu={contextMenu} onClose={() => setContextMenu(null)} />
+      <ExportToUsbDialog
+        isOpen={exportOpen}
+        onClose={() => setExportOpen(false)}
+      />
     </header>
   );
 }
@@ -73,7 +124,13 @@ export function WorkingFolderBar() {
  * vertical divider. The full path is exposed via the `title` attribute
  * for hover.
  */
-function WorkingFolderChip({ path }: { path: string }) {
+function WorkingFolderChip({
+  path,
+  onContextMenu,
+}: {
+  path: string;
+  onContextMenu: (e: React.MouseEvent) => void;
+}) {
   // Show the trailing 3 path segments — keeps the project-identifying
   // suffix visible when paths are deep.
   const parts = path.split("/").filter(Boolean);
@@ -84,6 +141,7 @@ function WorkingFolderChip({ path }: { path: string }) {
     <span
       className="user-text inline-flex h-[30px] max-w-[520px] items-center gap-2 rounded-md bg-zinc-100 pl-2.5 pr-2.5 dark:bg-zinc-900"
       title={path}
+      onContextMenu={onContextMenu}
     >
       <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-500">
         Working Folder

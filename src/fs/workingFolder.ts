@@ -95,6 +95,80 @@ export async function fileExists(path: string): Promise<boolean> {
   return invoke<boolean>("file_exists", { path });
 }
 
+/**
+ * Open the OS file manager and (where supported) highlight the given
+ * path. macOS uses `open -R`, Windows uses `explorer /select,`,
+ * Linux falls back to opening the parent folder via `xdg-open`.
+ */
+export async function revealInFileManager(path: string): Promise<void> {
+  await invoke<void>("reveal_in_file_manager", { path });
+}
+
+// ---------------------------------------------------------------------------
+// Phase 6 — USB Export
+// ---------------------------------------------------------------------------
+
+/** Mirrors the Rust `ExportProgress` struct emitted on "export-progress". */
+export interface ExportProgress {
+  currentFile: string;
+  filesCopied: number;
+  totalFiles: number;
+  bytesCopied: number;
+  totalBytes: number;
+}
+
+/** Mirrors the Rust `ExportSummary`. */
+export interface ExportSummary {
+  filesCopied: number;
+  bytesCopied: number;
+  /** True if dot_clean -m ran on macOS. False on other platforms. */
+  dotCleaned: boolean;
+}
+
+/**
+ * Copy the working folder's bm_media/ tree to `<destPath>/bm_media/`,
+ * emitting per-file "export-progress" events along the way. After the
+ * copy, runs `dot_clean -m <destPath>` on macOS to strip ._ files.
+ *
+ * The frontend should subscribe to "export-progress" via Tauri's
+ * event API before calling this (see `subscribeExportProgress`) so
+ * the dialog can update in real time.
+ */
+export async function exportToUsb(
+  workingFolder: string,
+  destPath: string,
+): Promise<ExportSummary> {
+  return invoke<ExportSummary>("export_to_usb", { workingFolder, destPath });
+}
+
+/**
+ * Subscribe to per-file progress events emitted during `exportToUsb`.
+ * Returns an unsubscribe function — call it in cleanup.
+ *
+ * Tauri's event system delivers events to whichever windows have
+ * subscribed; we have one main window, so this is straightforward.
+ */
+export async function subscribeExportProgress(
+  callback: (progress: ExportProgress) => void,
+): Promise<() => void> {
+  // Lazy-import to avoid pulling the event API into the bundle until
+  // export is actually in use.
+  const { listen } = await import("@tauri-apps/api/event");
+  return listen<ExportProgress>("export-progress", (e) => {
+    callback(e.payload);
+  });
+}
+
+/**
+ * Eject the volume mounted at `path` (macOS only — `diskutil eject`).
+ * Returns true if the eject command ran. Other platforms return
+ * false; the UI should fall back to a "please eject manually"
+ * message in that case.
+ */
+export async function ejectVolume(path: string): Promise<boolean> {
+  return invoke<boolean>("eject_volume", { path });
+}
+
 // ---------------------------------------------------------------------------
 // Phase 3f — New Song wizard
 // ---------------------------------------------------------------------------
@@ -177,6 +251,24 @@ export async function writeSongSidecar(
 export interface CreatedPlaylist {
   /** Absolute path the empty .jcp should be written to. */
   jcpPath: string;
+}
+
+/** Mirrors the Rust `CreatedTrackMap` struct. */
+export interface CreatedTrackMap {
+  /** Absolute path the empty .jcm should be written to. */
+  jcmPath: string;
+}
+
+/**
+ * Reserve a `.jcm` filename under
+ * `<workingFolder>/bm_media/bm_trackmaps/`. Returns the path the
+ * caller should `writeTextFile` the new track map into.
+ */
+export async function createTrackMap(
+  workingFolder: string,
+  name: string,
+): Promise<CreatedTrackMap> {
+  return invoke<CreatedTrackMap>("create_track_map", { workingFolder, name });
 }
 
 /**

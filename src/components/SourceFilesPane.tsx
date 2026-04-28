@@ -25,10 +25,11 @@
 
 import { useEffect, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { listAudioFiles } from "../fs/workingFolder";
+import { listAudioFiles, revealInFileManager } from "../fs/workingFolder";
 import type { AudioFileInfo } from "../fs/types";
 import { cn } from "../lib/cn";
 import { setDragImageLabel, setDragPayload } from "../lib/dnd";
+import { ContextMenu, type OpenContextMenu } from "./ContextMenu";
 
 type Tab = "song" | "source";
 
@@ -240,6 +241,7 @@ function FolderView({
   const [files, setFiles] = useState<AudioFileInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [contextMenu, setContextMenu] = useState<OpenContextMenu | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -268,8 +270,20 @@ function FolderView({
       <div className="flex shrink-0 flex-col gap-1.5 border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-800">
         <div className="flex items-start justify-between gap-2">
           <p
-            className="user-text min-w-0 flex-1 truncate self-center font-mono text-[10px] text-zinc-500"
+            className="user-text min-w-0 flex-1 cursor-context-menu truncate self-center font-mono text-[10px] text-zinc-500"
             title={folder}
+            onContextMenu={(e) => {
+              e.preventDefault();
+              setContextMenu({
+                position: { x: e.clientX, y: e.clientY },
+                items: [
+                  {
+                    label: "Open in Finder",
+                    onClick: () => void revealInFileManager(folder),
+                  },
+                ],
+              });
+            }}
           >
             {pathTail(folder)}
           </p>
@@ -326,6 +340,7 @@ function FolderView({
           </>
         )}
       </div>
+      <ContextMenu menu={contextMenu} onClose={() => setContextMenu(null)} />
     </>
   );
 }

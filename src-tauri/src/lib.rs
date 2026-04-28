@@ -27,7 +27,8 @@
 use serde::Serialize;
 use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use tauri::Emitter;
 
 // ---------------------------------------------------------------------------
 // WAV probe (Phase 1)
@@ -672,6 +673,128 @@ fn create_playlist(working_folder: String, name: String) -> Result<CreatedPlayli
 }
 
 // ---------------------------------------------------------------------------
+// "Open in Finder" — reveal a path in the OS file manager
+// ---------------------------------------------------------------------------
+
+/// Open the OS file manager and (where supported) highlight `path`.
+///
+/// Platform behavior:
+///   - macOS:   `open -R <path>` — reveals the file in Finder, the
+///              parent folder is opened with the item selected.
+///   - Windows: `explorer /select,<path>` — same idea: parent folder
+///              opens with the item highlighted.
+///   - Linux:   no standard "select" verb across desktops, so we open
+///              the parent folder via `xdg-open` and accept that the
+///              item won't be highlighted. (xdg-mime / nautilus -s
+///              would be Nautilus-specific.)
+///
+/// `path` may be a file or a folder. For a folder, the parent is
+/// opened and the folder itself is highlighted (macOS / Windows).
+#[tauri::command]
+fn reveal_in_file_manager(path: String) -> Result<(), String> {
+    let p = Path::new(&path);
+    if !p.exists() {
+        return Err(format!("Path does not exist: {}", path));
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg("-R")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("Cannot open Finder: {}", e))?;
+        return Ok(());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // /select, takes a single arg (with the comma) per the docs.
+        std::process::Command::new("explorer")
+            .arg(format!("/select,{}", path))
+            .spawn()
+            .map_err(|e| format!("Cannot open Explorer: {}", e))?;
+        return Ok(());
+    }
+
+    #[cfg(all(unix, not(target_os = "macos")))]
+    {
+        let to_open = if p.is_file() {
+            p.parent().unwrap_or(p).to_path_buf()
+        } else {
+            p.to_path_buf()
+        };
+        std::process::Command::new("xdg-open")
+            .arg(&to_open)
+            .spawn()
+            .map_err(|e| format!("Cannot open file manager: {}", e))?;
+        return Ok(());
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows", unix)))]
+    {
+        Err(format!("Reveal-in-file-manager is not supported on this platform: {}", path))
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Phase 5 — New Track Map wizard
+// ---------------------------------------------------------------------------
+
+/// Result of [`create_track_map`].
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatedTrackMap {
+    /// Absolute path the frontend should `write_text_file` the .jcm to.
+    pub jcm_path: String,
+}
+
+/// Reserve a `.jcm` filename under
+/// `<working_folder>/bm_media/bm_trackmaps/`.
+///
+///   1. Validates `name` (same rules as create_song / create_playlist).
+///   2. Errors if `<name>.jcm` already exists.
+///   3. Does NOT write the .jcm itself — caller writes via the codec.
+#[tauri::command]
+fn create_track_map(working_folder: String, name: String) -> Result<CreatedTrackMap, String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err("Track-map name cannot be empty.".to_string());
+    }
+    if trimmed.len() > 64 {
+        return Err("Track-map name is too long (max 64 characters).".to_string());
+    }
+    if trimmed.starts_with('.') {
+        return Err("Track-map name cannot start with a dot.".to_string());
+    }
+    if trimmed.contains('/') || trimmed.contains('\\') {
+        return Err("Track-map name cannot contain '/' or '\\'.".to_string());
+    }
+    if trimmed.contains('\0') {
+        return Err("Track-map name contains an invalid character.".to_string());
+    }
+
+    let working = Path::new(&working_folder);
+    if !working.is_dir() {
+        return Err(format!("Working folder is not a directory: {}", working_folder));
+    }
+    let bm_trackmaps = working.join("bm_media").join("bm_trackmaps");
+    if !bm_trackmaps.is_dir() {
+        return Err(
+            "bm_media/bm_trackmaps/ folder is missing — re-pick the working folder.".to_string(),
+        );
+    }
+    let jcm_path = bm_trackmaps.join(format!("{}.jcm", trimmed));
+    if jcm_path.exists() {
+        return Err(format!("A track map named '{}.jcm' already exists.", trimmed));
+    }
+
+    Ok(CreatedTrackMap {
+        jcm_path: jcm_path.to_string_lossy().to_string(),
+    })
+}
+
+// ---------------------------------------------------------------------------
 // Phase 4 — Delete + Duplicate operations
 // ---------------------------------------------------------------------------
 //
@@ -1043,6 +1166,236 @@ fn write_song_sidecar(song_folder: String, content: String) -> Result<(), String
 }
 
 // ---------------------------------------------------------------------------
+// Phase 6 — USB Export
+// ---------------------------------------------------------------------------
+
+/// Per-file progress event emitted during `export_to_usb`. The
+/// frontend subscribes to the "export-progress" event channel and
+/// updates the export dialog's progress bar as files arrive.
+#[derive(Debug, Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportProgress {
+    /// Filename currently being copied (just the basename).
+    pub current_file: String,
+    pub files_copied: u64,
+    pub total_files: u64,
+    pub bytes_copied: u64,
+    pub total_bytes: u64,
+}
+
+/// Summary returned when `export_to_usb` completes successfully.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportSummary {
+    pub files_copied: u64,
+    pub bytes_copied: u64,
+    /// True if `dot_clean -m` ran (macOS only).
+    pub dot_cleaned: bool,
+}
+
+/// Recursively count files + bytes under `src` so we can compute
+/// progress percentages without re-walking.
+fn count_tree(src: &Path) -> std::io::Result<(u64, u64)> {
+    let mut files = 0u64;
+    let mut bytes = 0u64;
+    if src.is_file() {
+        files += 1;
+        bytes += src.metadata()?.len();
+        return Ok((files, bytes));
+    }
+    if !src.is_dir() {
+        return Ok((0, 0));
+    }
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let kind = entry.file_type()?;
+        if kind.is_dir() {
+            let (f, b) = count_tree(&entry.path())?;
+            files += f;
+            bytes += b;
+        } else if kind.is_file() {
+            // Skip macOS hidden metadata that we'd be cleaning out
+            // anyway — counting them inflates the "total" against
+            // the post-cleanup reality.
+            let name = entry.file_name();
+            let name_str = name.to_string_lossy();
+            if name_str == ".DS_Store" || name_str.starts_with("._") {
+                continue;
+            }
+            files += 1;
+            bytes += entry.metadata()?.len();
+        }
+    }
+    Ok((files, bytes))
+}
+
+/// Recursively copy `src` → `dst`, emitting per-file progress events
+/// to the frontend. Skips macOS metadata (`.DS_Store`, `._*`) on the
+/// way in — `dot_clean` cleans up afterward but skipping during copy
+/// avoids the AppleDouble files ever existing on the destination.
+fn copy_tree_with_progress(
+    src: &Path,
+    dst: &Path,
+    app: &tauri::AppHandle,
+    files_copied: &mut u64,
+    bytes_copied: &mut u64,
+    total_files: u64,
+    total_bytes: u64,
+) -> Result<(), String> {
+    fs::create_dir_all(dst).map_err(|e| format!("Cannot create {:?}: {}", dst, e))?;
+    for entry in fs::read_dir(src).map_err(|e| format!("Cannot read {:?}: {}", src, e))? {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let kind = entry.file_type().map_err(|e| e.to_string())?;
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy().to_string();
+        if name_str == ".DS_Store" || name_str.starts_with("._") {
+            continue;
+        }
+        let from = entry.path();
+        let to = dst.join(&name);
+        if kind.is_dir() {
+            copy_tree_with_progress(
+                &from, &to, app, files_copied, bytes_copied, total_files, total_bytes,
+            )?;
+        } else if kind.is_file() {
+            let size = entry.metadata().map_err(|e| e.to_string())?.len();
+            fs::copy(&from, &to)
+                .map_err(|e| format!("Cannot copy {:?} → {:?}: {}", from, to, e))?;
+            *files_copied += 1;
+            *bytes_copied += size;
+            // Best-effort emit — don't fail the whole copy if the
+            // event channel is gone (window closed mid-copy etc.).
+            let _ = app.emit(
+                "export-progress",
+                ExportProgress {
+                    current_file: name_str,
+                    files_copied: *files_copied,
+                    total_files,
+                    bytes_copied: *bytes_copied,
+                    total_bytes,
+                },
+            );
+        }
+    }
+    Ok(())
+}
+
+/// Run `dot_clean -m <path>` on macOS to strip `._*` AppleDouble files
+/// from the destination. Returns Ok(true) on macOS, Ok(false) on
+/// other platforms (silent no-op so the frontend doesn't have to
+/// branch on platform).
+#[allow(unused_variables)]
+fn run_dot_clean(path: &Path) -> Result<bool, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let status = std::process::Command::new("dot_clean")
+            .arg("-m")
+            .arg(path)
+            .status()
+            .map_err(|e| format!("dot_clean spawn failed: {}", e))?;
+        if !status.success() {
+            return Err(format!("dot_clean exited with {}", status));
+        }
+        return Ok(true);
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        Ok(false)
+    }
+}
+
+/// Copy `<working_folder>/bm_media/` to `<dest_path>/bm_media/`,
+/// emitting per-file progress events on the "export-progress"
+/// channel, and running `dot_clean -m <dest_path>` on macOS to strip
+/// AppleDouble files.
+///
+/// `dest_path` is the USB mount point (or any folder); the user picks
+/// it via the native folder picker on the frontend before this is
+/// invoked.
+#[tauri::command]
+fn export_to_usb(
+    app: tauri::AppHandle,
+    working_folder: String,
+    dest_path: String,
+) -> Result<ExportSummary, String> {
+    let src = PathBuf::from(&working_folder).join("bm_media");
+    let dst = PathBuf::from(&dest_path).join("bm_media");
+    if !src.is_dir() {
+        return Err(format!(
+            "Working folder has no bm_media/ subfolder: {}",
+            working_folder
+        ));
+    }
+    if !Path::new(&dest_path).is_dir() {
+        return Err(format!("Destination is not a directory: {}", dest_path));
+    }
+
+    // Count first so we have totals for progress calculation.
+    let (total_files, total_bytes) =
+        count_tree(&src).map_err(|e| format!("Cannot scan working folder: {}", e))?;
+
+    // Initial progress event so the dialog shows totals before any
+    // file has been copied.
+    let _ = app.emit(
+        "export-progress",
+        ExportProgress {
+            current_file: String::new(),
+            files_copied: 0,
+            total_files,
+            bytes_copied: 0,
+            total_bytes,
+        },
+    );
+
+    let mut files_copied = 0u64;
+    let mut bytes_copied = 0u64;
+    copy_tree_with_progress(
+        &src,
+        &dst,
+        &app,
+        &mut files_copied,
+        &mut bytes_copied,
+        total_files,
+        total_bytes,
+    )?;
+
+    let dot_cleaned = run_dot_clean(Path::new(&dest_path))?;
+
+    Ok(ExportSummary {
+        files_copied,
+        bytes_copied,
+        dot_cleaned,
+    })
+}
+
+/// Eject the volume mounted at `path` (macOS only).
+///
+/// Calls `diskutil eject <path>`. On other platforms returns Ok(false)
+/// — Linux uses `umount`, Windows uses different APIs, both of which
+/// usually need elevated privileges. The frontend treats false as
+/// "platform doesn't auto-eject; tell the user to eject manually."
+#[tauri::command]
+fn eject_volume(path: String) -> Result<bool, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let status = std::process::Command::new("diskutil")
+            .arg("eject")
+            .arg(&path)
+            .status()
+            .map_err(|e| format!("diskutil spawn failed: {}", e))?;
+        if !status.success() {
+            return Err(format!("diskutil exited with {}", status));
+        }
+        return Ok(true);
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = path;
+        Ok(false)
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Tauri runtime entry
 // ---------------------------------------------------------------------------
 
@@ -1066,6 +1419,10 @@ pub fn run() {
             read_song_sidecar,
             write_song_sidecar,
             create_playlist,
+            create_track_map,
+            reveal_in_file_manager,
+            export_to_usb,
+            eject_volume,
             delete_song,
             delete_playlist,
             delete_track_map,

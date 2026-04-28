@@ -75,7 +75,7 @@ const EMPTY_EDITOR: EditorState = {
 };
 
 export function PlaylistEditor({ jcpPath }: Props) {
-  const { state, dispatch, rescan } = useAppState();
+  const { state, dispatch, rescan, registerDirtyEditor } = useAppState();
 
   const [editor, setEditor] = useState<EditorState>(EMPTY_EDITOR);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -348,6 +348,16 @@ export function PlaylistEditor({ jcpPath }: Props) {
     );
   }, [editor]);
 
+  // Register dirty state for the unsaved-changes guard.
+  const isDirtyRef = useRef(isDirty);
+  isDirtyRef.current = isDirty;
+  useEffect(() => {
+    return registerDirtyEditor({
+      isDirty: () => isDirtyRef.current,
+      label: playlistDisplayName,
+    });
+  }, [registerDirtyEditor, playlistDisplayName]);
+
   const canUndo = editor.past.length > 0;
   const canRedo = editor.future.length > 0;
 
@@ -428,6 +438,27 @@ export function PlaylistEditor({ jcpPath }: Props) {
         redo();
         return;
       }
+      // Cmd/Ctrl + Arrow — move the highlighted song row up/down.
+      if (meta && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+        const target = e.target as HTMLElement | null;
+        const tag = target?.tagName?.toLowerCase();
+        if (
+          tag === "input" ||
+          tag === "textarea" ||
+          tag === "select" ||
+          target?.isContentEditable
+        ) {
+          return;
+        }
+        const sel = state.playlistRowSelection;
+        if (sel === null) return;
+        e.preventDefault();
+        const delta = e.key === "ArrowUp" ? -1 : 1;
+        // Reuse the on-row up/down arrow handler (delta-based wrapper
+        // around handleReorderTo).
+        handleMoveRow(sel, delta);
+        return;
+      }
       if (e.key === "Delete" || e.key === "Backspace") {
         const target = e.target as HTMLElement | null;
         const tag = target?.tagName?.toLowerCase();
@@ -450,6 +481,7 @@ export function PlaylistEditor({ jcpPath }: Props) {
   }, [
     handleSave,
     handleRemoveRow,
+    handleMoveRow,
     undo,
     redo,
     state.playlistRowSelection,
@@ -858,7 +890,7 @@ function PlaylistSongList({
                           onMoveRow(idx, -1);
                         }}
                         disabled={idx === 0}
-                        title="Move up"
+                        title="Move up (⌘↑)"
                         ariaLabel="Move up"
                       >
                         <ArrowUpIcon className="h-3 w-3" />
@@ -869,7 +901,7 @@ function PlaylistSongList({
                           onMoveRow(idx, 1);
                         }}
                         disabled={idx === songs.length - 1}
-                        title="Move down"
+                        title="Move down (⌘↓)"
                         ariaLabel="Move down"
                       >
                         <ArrowDownIcon className="h-3 w-3" />

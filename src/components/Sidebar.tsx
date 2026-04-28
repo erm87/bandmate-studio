@@ -33,6 +33,7 @@ import {
   renamePlaylist,
   renameSong,
   renameTrackMap,
+  revealInFileManager,
   writeTextFile,
 } from "../fs/workingFolder";
 import {
@@ -45,6 +46,7 @@ import { cn } from "../lib/cn";
 import { ContextMenu, type OpenContextMenu } from "./ContextMenu";
 import { NewSongDialog } from "./NewSongDialog";
 import { NewPlaylistDialog } from "./NewPlaylistDialog";
+import { NewTrackMapDialog } from "./NewTrackMapDialog";
 import { RenameDialog } from "./RenameDialog";
 import type {
   PlaylistSummary,
@@ -79,11 +81,18 @@ type RenameTarget =
     };
 
 export function Sidebar() {
-  const { state, dispatch, rescan } = useAppState();
+  const {
+    state,
+    dispatch,
+    rescan,
+    requestSelect,
+    requestClearSelection,
+  } = useAppState();
   const { songs, playlists, trackMaps } = state.scan;
   const sel = state.selection;
   const [newSongOpen, setNewSongOpen] = useState(false);
   const [newPlaylistOpen, setNewPlaylistOpen] = useState(false);
+  const [newTrackMapOpen, setNewTrackMapOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState<OpenContextMenu | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
   /**
@@ -99,10 +108,13 @@ export function Sidebar() {
       | { kind: "trackMap"; path: string },
     isActive: boolean,
   ) => {
+    // Both branches go through the request* helpers so the
+    // unsaved-changes guard can intercept if the current editor is
+    // dirty.
     if (isActive) {
-      dispatch({ type: "clear_selection" });
+      void requestClearSelection();
     } else {
-      dispatch({ type: "select", selection });
+      void requestSelect(selection);
     }
   };
 
@@ -507,6 +519,11 @@ export function Sidebar() {
                   }
                   onContextMenu={(e) =>
                     openMenu(e, [
+                      {
+                        label: "Open in Finder",
+                        onClick: () => void revealInFileManager(s.folderPath),
+                      },
+                      "divider",
                       renameSongItem(s),
                       {
                         label: "Duplicate",
@@ -554,6 +571,11 @@ export function Sidebar() {
                   }
                   onContextMenu={(e) =>
                     openMenu(e, [
+                      {
+                        label: "Open in Finder",
+                        onClick: () => void revealInFileManager(p.path),
+                      },
+                      "divider",
                       renamePlaylistItem(p),
                       {
                         label: "Duplicate",
@@ -573,9 +595,19 @@ export function Sidebar() {
           )}
         </Section>
 
-        <Section title="Track Maps" count={trackMaps.length}>
+        <Section
+          title="Track Maps"
+          count={trackMaps.length}
+          action={
+            <SectionAction
+              label="New Track Map"
+              ariaLabel="New Track Map"
+              onClick={() => setNewTrackMapOpen(true)}
+            />
+          }
+        >
           {trackMaps.length === 0 ? (
-            <SectionEmpty hint="Track maps name your output channels." />
+            <SectionEmpty hint="Use “+ New Track Map” above to name your output channels." />
           ) : (
             trackMaps.map((tm) => {
               const isActive =
@@ -591,6 +623,11 @@ export function Sidebar() {
                   }
                   onContextMenu={(e) =>
                     openMenu(e, [
+                      {
+                        label: "Open in Finder",
+                        onClick: () => void revealInFileManager(tm.path),
+                      },
+                      "divider",
                       renameTrackMapItem(tm),
                       {
                         label: "Duplicate",
@@ -617,6 +654,10 @@ export function Sidebar() {
       <NewPlaylistDialog
         isOpen={newPlaylistOpen}
         onClose={() => setNewPlaylistOpen(false)}
+      />
+      <NewTrackMapDialog
+        isOpen={newTrackMapOpen}
+        onClose={() => setNewTrackMapOpen(false)}
       />
       <ContextMenu menu={contextMenu} onClose={() => setContextMenu(null)} />
       <RenameDialog

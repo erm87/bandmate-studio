@@ -6,6 +6,8 @@
  */
 
 import { useAppState } from "../state/AppState";
+import joecoLogoNeon from "../assets/joeco-logo-neon.png";
+import joecoLogoWhite from "../assets/joeco-logo-white.png";
 
 export function EmptyState() {
   const { chooseWorkingFolder, state } = useAppState();
@@ -15,12 +17,20 @@ export function EmptyState() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-zinc-50 p-8 dark:bg-zinc-950">
       <div className="w-full max-w-md space-y-6 text-center">
-        <div
-          className="mx-auto flex h-16 w-16 items-center justify-center rounded-2xl bg-brand-500 text-3xl text-white shadow-sm"
-          aria-hidden="true"
-        >
-          ♪
-        </div>
+        <picture>
+          <img
+            src={joecoLogoNeon}
+            alt="JoeCo"
+            className="mx-auto block h-12 w-auto dark:hidden"
+            draggable={false}
+          />
+          <img
+            src={joecoLogoWhite}
+            alt="JoeCo"
+            className="mx-auto hidden h-12 w-auto dark:block"
+            draggable={false}
+          />
+        </picture>
 
         <div className="space-y-2">
           <h1 className="text-3xl font-semibold tracking-tight">
