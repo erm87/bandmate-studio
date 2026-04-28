@@ -35,11 +35,28 @@ export type AppStatus =
   | "ready"         // scan complete, lists available
   | "error";        // scan failed
 
+/** Identity of the currently-selected sidebar item. */
+export type Selection =
+  | { kind: "song"; jcsPath: string }
+  | { kind: "playlist"; path: string }
+  | { kind: "trackMap"; path: string };
+
 export interface AppState {
   workingFolder: string | null;
   scan: ScanResult;
   status: AppStatus;
   error: string | null;
+  /** What the user has highlighted in the sidebar (if anything). */
+  selection: Selection | null;
+  /**
+   * Currently-selected channel inside the song editor (0..24) or null.
+   * Lives in AppState rather than SongEditor's local state so the
+   * top-level ESC handler in `App.tsx` can clear the channel
+   * highlight before falling back to clearing the sidebar selection.
+   * Reset to null whenever the sidebar selection changes (different
+   * song = no carryover highlight).
+   */
+  channelSelection: number | null;
 }
 
 const EMPTY_SCAN: ScanResult = { songs: [], playlists: [], trackMaps: [] };
@@ -49,6 +66,8 @@ const INITIAL_STATE: AppState = {
   scan: EMPTY_SCAN,
   status: "idle",
   error: null,
+  selection: null,
+  channelSelection: null,
 };
 
 // ---------------------------------------------------------------------------
@@ -59,7 +78,10 @@ export type AppAction =
   | { type: "scan_started"; path: string }
   | { type: "scan_succeeded"; result: ScanResult }
   | { type: "scan_failed"; error: string }
-  | { type: "clear_working_folder" };
+  | { type: "clear_working_folder" }
+  | { type: "select"; selection: Selection }
+  | { type: "clear_selection" }
+  | { type: "select_channel"; channel: number | null };
 
 function reducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
@@ -70,13 +92,38 @@ function reducer(state: AppState, action: AppAction): AppState {
         status: "loading",
         error: null,
       };
-    case "scan_succeeded":
+    case "scan_succeeded": {
+      // After a re-scan, if the previously-selected item no longer
+      // exists, drop the selection so the editor doesn't show stale
+      // content. We bind the narrowed selection to a local in each
+      // case branch — TS forgets the discriminator narrowing inside
+      // the `.some(...)` lambda closures otherwise.
+      const sel = state.selection;
+      const stillExists = (() => {
+        if (!sel) return false;
+        switch (sel.kind) {
+          case "song": {
+            const target = sel.jcsPath;
+            return action.result.songs.some((s) => s.jcsPath === target);
+          }
+          case "playlist": {
+            const target = sel.path;
+            return action.result.playlists.some((p) => p.path === target);
+          }
+          case "trackMap": {
+            const target = sel.path;
+            return action.result.trackMaps.some((t) => t.path === target);
+          }
+        }
+      })();
       return {
         ...state,
         scan: action.result,
         status: "ready",
         error: null,
+        selection: stillExists ? state.selection : null,
       };
+    }
     case "scan_failed":
       return {
         ...state,
@@ -85,6 +132,18 @@ function reducer(state: AppState, action: AppAction): AppState {
       };
     case "clear_working_folder":
       return { ...INITIAL_STATE };
+    case "select":
+      // Reset channel selection when sidebar selection changes —
+      // the new editor opens fresh.
+      return {
+        ...state,
+        selection: action.selection,
+        channelSelection: null,
+      };
+    case "clear_selection":
+      return { ...state, selection: null, channelSelection: null };
+    case "select_channel":
+      return { ...state, channelSelection: action.channel };
     default: {
       // Exhaustiveness check — TS will error if we add an action and
       // forget to handle it here.

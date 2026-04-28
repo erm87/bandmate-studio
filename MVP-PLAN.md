@@ -162,6 +162,29 @@ The "Download to USB Stick" workflow. Replaces the Uploader tab's first row.
 
 ## Out of scope for v0.1 (deferred to v0.2+)
 
+- **Save As** — the save-confirm dialog gains a "Save as new" option that
+  duplicates the song folder + `.jcs` under a user-chosen name with the
+  current edits applied, leaving the original untouched. Same machinery
+  applies to Playlists and Track Maps.
+- **Duplicate song / playlist** — right-click on a sidebar row → "Duplicate"
+  creates an independent copy under a derived name (e.g., "Buffy 2"),
+  copying the folder + all WAVs for songs, or the `.jcp` for playlists.
+  Selection auto-switches to the duplicate. Shares folder-copy machinery
+  with Save As.
+- **Song renaming** — currently the song name in the header is read-only.
+  Renaming requires a folder rename + `.jcs` rename + updating any
+  playlist `<song_name>` references. Doable, just needs careful handling.
+- **Undo History menu** — native macOS app menu "Edit" with an
+  "Undo History" item that opens a panel listing the last N edits in
+  the song editor's past stack. Lets the user jump back to a specific
+  snapshot rather than mashing Cmd+Z. Today's surfaces are Cmd+Z /
+  Cmd+Shift+Z and the toolbar buttons only.
+- **Dark-mode channel-row selection contrast** — when a row in the
+  channel grid is selected in dark mode, the `bg-brand-950/30`
+  highlight + `text-brand-100` filename combination washes out: the
+  filename becomes very hard to read against the brand-tinted
+  background. Tone the highlight down and/or pick a more legible text
+  color for selected dark-mode rows.
 - Bulk editing across multiple songs (Eric's issue #9)
 - "Diff against USB" view: visual indicator of which songs on the USB are stale vs the working folder
 - BandMate firmware update workflow (the second/third rows of BM Loader's Uploader tab)

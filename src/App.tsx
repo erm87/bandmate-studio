@@ -6,15 +6,19 @@
  *   - Working folder set:    top bar + left sidebar + right pane.
  *
  * Phase 2 ships the empty state, working-folder bar, and three-list
- * sidebar. The right pane is a read-only summary (<MainPlaceholder>);
- * Phase 3 replaces it with real editors.
+ * sidebar. Phase 3 adds selection wiring and the Song editor.
+ *
+ * Global keybindings:
+ *   - ESC clears the current selection (returns to the project-summary
+ *     stub on the right).
  */
 
+import { useEffect } from "react";
 import { AppStateProvider, useAppState } from "./state/AppState";
 import { EmptyState } from "./components/EmptyState";
 import { WorkingFolderBar } from "./components/WorkingFolderBar";
 import { Sidebar } from "./components/Sidebar";
-import { MainPlaceholder } from "./components/MainPlaceholder";
+import { EditorPane } from "./components/EditorPane";
 
 export default function App() {
   return (
@@ -25,7 +29,33 @@ export default function App() {
 }
 
 function Shell() {
-  const { state } = useAppState();
+  const { state, dispatch } = useAppState();
+
+  // ESC clears the editor's channel highlight first, then falls back to
+  // clearing the sidebar selection. Skipped if focus is in an input
+  // so it doesn't fight inline editing.
+  useEffect(() => {
+    const onKeydown = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      if (
+        tag === "input" ||
+        tag === "textarea" ||
+        tag === "select" ||
+        target?.isContentEditable
+      ) {
+        return;
+      }
+      if (state.channelSelection !== null) {
+        dispatch({ type: "select_channel", channel: null });
+      } else if (state.selection !== null) {
+        dispatch({ type: "clear_selection" });
+      }
+    };
+    window.addEventListener("keydown", onKeydown);
+    return () => window.removeEventListener("keydown", onKeydown);
+  }, [state.selection, state.channelSelection, dispatch]);
 
   // Show empty state until the user has chosen a folder. We also fall
   // back to it if there's an error AND no scan results yet (e.g. the
@@ -40,7 +70,7 @@ function Shell() {
       <WorkingFolderBar />
       <div className="flex flex-1 overflow-hidden">
         <Sidebar />
-        <MainPlaceholder />
+        <EditorPane />
       </div>
     </div>
   );

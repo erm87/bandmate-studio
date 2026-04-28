@@ -1,16 +1,9 @@
 /**
  * Left sidebar with three sections: Songs, Playlists, Track Maps.
  *
- * UX notes (Phase 2 v2):
- *   - Sidebar scrolls independently of the main pane (`overflow-y-auto`).
- *   - Each section is collapsible (native <details>/<summary>); all
- *     start expanded. Collapsed state is per-mount only — we don't
- *     persist it across launches in v0.1.
- *   - Rows show only the primary name (e.g. "Buffy"), not the redundant
- *     filename underneath.
- *
- * For Phase 2 the rows are not yet selectable — clicking does nothing.
- * Phase 3 will wire up selection and an editor pane on the right.
+ * Phase 3a: rows are now clickable. Clicking dispatches a `select`
+ * action; the active row gets a brand highlight and the editor pane
+ * on the right opens the matching item.
  */
 
 import type { ReactNode } from "react";
@@ -18,8 +11,29 @@ import { useAppState } from "../state/AppState";
 import { cn } from "../lib/cn";
 
 export function Sidebar() {
-  const { state } = useAppState();
+  const { state, dispatch } = useAppState();
   const { songs, playlists, trackMaps } = state.scan;
+  const sel = state.selection;
+
+  /**
+   * Click handler: dispatching select on the already-active row clears
+   * the selection (toggle behavior). This gives the user a way to
+   * return to the working-folder stats view from the same control they
+   * used to enter an editor.
+   */
+  const toggleSelect = (
+    selection:
+      | { kind: "song"; jcsPath: string }
+      | { kind: "playlist"; path: string }
+      | { kind: "trackMap"; path: string },
+    isActive: boolean,
+  ) => {
+    if (isActive) {
+      dispatch({ type: "clear_selection" });
+    } else {
+      dispatch({ type: "select", selection });
+    }
+  };
 
   return (
     <aside className="flex w-80 shrink-0 flex-col overflow-y-auto border-r border-zinc-200 bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950">
@@ -28,13 +42,24 @@ export function Sidebar() {
           {songs.length === 0 ? (
             <SectionEmpty hint="Use “New Song” to add one." />
           ) : (
-            songs.map((s) => (
-              <SidebarRow
-                key={s.jcsPath}
-                label={s.folderName}
-                title={`${s.folderName}.jcs`}
-              />
-            ))
+            songs.map((s) => {
+              const isActive =
+                sel?.kind === "song" && sel.jcsPath === s.jcsPath;
+              return (
+                <SidebarRow
+                  key={s.jcsPath}
+                  label={s.folderName}
+                  title={`${s.folderName}.jcs${isActive ? " (click to deselect)" : ""}`}
+                  active={isActive}
+                  onClick={() =>
+                    toggleSelect(
+                      { kind: "song", jcsPath: s.jcsPath },
+                      isActive,
+                    )
+                  }
+                />
+              );
+            })
           )}
         </Section>
 
@@ -42,13 +67,21 @@ export function Sidebar() {
           {playlists.length === 0 ? (
             <SectionEmpty hint="Build a playlist from your songs." />
           ) : (
-            playlists.map((p) => (
-              <SidebarRow
-                key={p.path}
-                label={p.filename.replace(/\.jcp$/i, "")}
-                title={p.filename}
-              />
-            ))
+            playlists.map((p) => {
+              const isActive =
+                sel?.kind === "playlist" && sel.path === p.path;
+              return (
+                <SidebarRow
+                  key={p.path}
+                  label={p.filename.replace(/\.jcp$/i, "")}
+                  title={`${p.filename}${isActive ? " (click to deselect)" : ""}`}
+                  active={isActive}
+                  onClick={() =>
+                    toggleSelect({ kind: "playlist", path: p.path }, isActive)
+                  }
+                />
+              );
+            })
           )}
         </Section>
 
@@ -56,13 +89,21 @@ export function Sidebar() {
           {trackMaps.length === 0 ? (
             <SectionEmpty hint="Track maps name your output channels." />
           ) : (
-            trackMaps.map((tm) => (
-              <SidebarRow
-                key={tm.path}
-                label={tm.filename.replace(/_tm\.jcm$|\.jcm$/i, "")}
-                title={tm.filename}
-              />
-            ))
+            trackMaps.map((tm) => {
+              const isActive =
+                sel?.kind === "trackMap" && sel.path === tm.path;
+              return (
+                <SidebarRow
+                  key={tm.path}
+                  label={tm.filename.replace(/_tm\.jcm$|\.jcm$/i, "")}
+                  title={`${tm.filename}${isActive ? " (click to deselect)" : ""}`}
+                  active={isActive}
+                  onClick={() =>
+                    toggleSelect({ kind: "trackMap", path: tm.path }, isActive)
+                  }
+                />
+              );
+            })
           )}
         </Section>
       </nav>
@@ -112,15 +153,17 @@ function SidebarRow({
   label,
   title,
   active,
+  onClick,
 }: {
   label: string;
-  /** Tooltip — useful for showing the underlying filename on hover. */
   title?: string;
   active?: boolean;
+  onClick: () => void;
 }) {
   return (
     <button
       type="button"
+      onClick={onClick}
       className={cn(
         "block w-full truncate px-4 py-1.5 text-left text-sm transition",
         active
@@ -134,11 +177,6 @@ function SidebarRow({
   );
 }
 
-/**
- * Inline SVG chevron-right. Inlined to avoid pulling in an icon library
- * for a single shape. Rotates to chevron-down via the `group-open`
- * variant in the parent `<details>`.
- */
 function Chevron({ className }: { className?: string }) {
   return (
     <svg
