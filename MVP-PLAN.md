@@ -174,6 +174,15 @@ The "Download to USB Stick" workflow. Replaces the Uploader tab's first row.
 - **Song renaming** — currently the song name in the header is read-only.
   Renaming requires a folder rename + `.jcs` rename + updating any
   playlist `<song_name>` references. Doable, just needs careful handling.
+- **Codec parity audit against decompiled BM Loader** — compare our
+  parse/write functions in `src/codec/` against JoeCo's equivalents
+  in `decompiled/per_function/playlistparse/`. Document divergences
+  in `SPEC.md`; fix or annotate as intentional. Verify field
+  acceptance, leniency, write formatting, the `<length>` computation,
+  and validation rules. Clean-room discipline: any change motivated
+  by their code is re-described in our own words; never paste.
+  `decompiled/` stays gitignored (research material; not part of the
+  public rebuild).
 - **v0.2 UI craft pass — design system + JoeCo neon theme** — once
   MVP features are functionally complete, do a comprehensive craft
   pass:
