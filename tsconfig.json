@@ -21,8 +21,10 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["src/*"]
-    }
+    },
+
+    "types": ["node", "vitest/globals"]
   },
-  "include": ["src", "vite.config.ts"],
+  "include": ["src", "vite.config.ts", "vitest.config.ts"],
   "exclude": ["node_modules", "src-tauri", "dist"]
 }

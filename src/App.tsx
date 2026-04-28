@@ -1,35 +1,47 @@
 /**
- * BandMate Studio — placeholder shell for Phase 0 scaffold verification.
+ * BandMate Studio — top-level layout.
  *
- * This screen exists to confirm the Tauri+Vite+React+Tailwind toolchain
- * runs end-to-end. We're intentionally NOT writing real UI here yet —
- * Phase 1 (file-format codec library) comes first, then Phase 2 (working
- * folder + project state) lays down the actual app shell.
+ * Two states:
+ *   - No working folder yet: full-screen <EmptyState> with a single CTA.
+ *   - Working folder set:    top bar + left sidebar + right pane.
  *
- * Once you've seen this render in `pnpm tauri dev`, this file gets
- * replaced.
+ * Phase 2 ships the empty state, working-folder bar, and three-list
+ * sidebar. The right pane is a read-only summary (<MainPlaceholder>);
+ * Phase 3 replaces it with real editors.
  */
+
+import { AppStateProvider, useAppState } from "./state/AppState";
+import { EmptyState } from "./components/EmptyState";
+import { WorkingFolderBar } from "./components/WorkingFolderBar";
+import { Sidebar } from "./components/Sidebar";
+import { MainPlaceholder } from "./components/MainPlaceholder";
+
 export default function App() {
   return (
-    <main className="flex min-h-screen flex-col items-center justify-center p-8">
-      <div className="max-w-xl space-y-4 text-center">
-        <h1 className="text-3xl font-semibold tracking-tight">
-          BandMate Studio
-        </h1>
-        <p className="text-zinc-600 dark:text-zinc-400">
-          Phase 0 scaffold — toolchain check. If you can read this in a
-          native macOS window, the build is wired up correctly.
-        </p>
-        <p className="text-sm text-zinc-500 dark:text-zinc-500">
-          Next up: <span className="font-mono">SPEC.md</span> Phase 1 — file-format
-          codec library.
-        </p>
-        <div className="pt-4">
-          <span className="inline-block rounded-full bg-brand-100 px-3 py-1 text-xs font-medium text-brand-700 dark:bg-brand-900 dark:text-brand-100">
-            v0.1.0-pre
-          </span>
-        </div>
+    <AppStateProvider>
+      <Shell />
+    </AppStateProvider>
+  );
+}
+
+function Shell() {
+  const { state } = useAppState();
+
+  // Show empty state until the user has chosen a folder. We also fall
+  // back to it if there's an error AND no scan results yet (e.g. the
+  // restored path doesn't exist anymore).
+  const hasFolder = state.workingFolder !== null;
+  if (!hasFolder) {
+    return <EmptyState />;
+  }
+
+  return (
+    <div className="flex min-h-screen flex-col bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100">
+      <WorkingFolderBar />
+      <div className="flex flex-1 overflow-hidden">
+        <Sidebar />
+        <MainPlaceholder />
       </div>
-    </main>
+    </div>
   );
 }

@@ -7,7 +7,7 @@ import react from "@vitejs/plugin-react";
 //   webview can connect.
 // - We disable Vite's default error overlay's full-screen mode because
 //   it covers the chrome we'll need for keyboard shortcut testing.
-export default defineConfig(async () => ({
+export default defineConfig({
   plugins: [react()],
 
   // Prevent vite from obscuring rust errors that are written to stderr
@@ -36,6 +36,6 @@ export default defineConfig(async () => ({
   build: {
     target: "es2021",
     minify: "esbuild",
-    sourcemap: process.env.NODE_ENV !== "production",
+    sourcemap: true,
   },
-}));
+});

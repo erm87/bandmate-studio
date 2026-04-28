@@ -21,3 +21,14 @@ textarea,
 :focus:not(:focus-visible) {
   outline: none;
 }
+
+/* Hide native <summary> disclosure markers so only our chevron shows.
+   Cross-browser: list-style for Firefox, ::-webkit-details-marker for
+   Safari and older Chrome, ::marker for current Chromium. */
+.bms-summary {
+  list-style: none;
+}
+.bms-summary::-webkit-details-marker,
+.bms-summary::marker {
+  display: none;
+}
