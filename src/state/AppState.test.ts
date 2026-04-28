@@ -66,4 +66,37 @@ describe("AppState reducer", () => {
     const cleared = reducer(ready, { type: "clear_working_folder" });
     expect(cleared).toEqual(initialState);
   });
+
+  it("select_channel sets the channel index", () => {
+    const next = reducer(initialState, { type: "select_channel", channel: 5 });
+    expect(next.channelSelection).toBe(5);
+    const cleared = reducer(next, { type: "select_channel", channel: null });
+    expect(cleared.channelSelection).toBeNull();
+  });
+
+  it("changing sidebar selection resets the channel selection", () => {
+    const withChannel = reducer(initialState, {
+      type: "select_channel",
+      channel: 3,
+    });
+    const newSong = reducer(withChannel, {
+      type: "select",
+      selection: { kind: "song", jcsPath: "/some/song.jcs" },
+    });
+    expect(newSong.channelSelection).toBeNull();
+  });
+
+  it("clear_selection also clears channel selection", () => {
+    const withSong = reducer(initialState, {
+      type: "select",
+      selection: { kind: "song", jcsPath: "/x.jcs" },
+    });
+    const withChannel = reducer(withSong, {
+      type: "select_channel",
+      channel: 2,
+    });
+    const cleared = reducer(withChannel, { type: "clear_selection" });
+    expect(cleared.selection).toBeNull();
+    expect(cleared.channelSelection).toBeNull();
+  });
 });

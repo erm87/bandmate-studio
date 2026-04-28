@@ -25,7 +25,8 @@
 //   - dot_clean: shell out to `dot_clean -m <path>` on macOS
 
 use serde::Serialize;
-use std::fs;
+use std::fs::{self, File};
+use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
 // ---------------------------------------------------------------------------
@@ -236,6 +237,283 @@ fn write_text_file(path: String, content: String) -> Result<(), String> {
 }
 
 // ---------------------------------------------------------------------------
+// Source-files-pane support (Phase 3)
+// ---------------------------------------------------------------------------
+
+/// Audio/MIDI file in a source folder, with WAV-header info baked in
+/// so the frontend doesn't have to round-trip per file.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AudioFileInfo {
+    pub filename: String,
+    pub path: String,
+    /// File extension lowercased: "wav" or "mid".
+    pub kind: String,
+    /// Mono/stereo + duration etc. for WAV files. Populated even when
+    /// the file has a `Warning`-severity diagnostic, since lenient
+    /// header parsing can extract metadata for technically-out-of-spec
+    /// files that the BandMate hardware nonetheless plays cleanly.
+    /// `None` for MIDI files (no audio metadata applies) or for files
+    /// with an `Error`-severity diagnostic that prevented header read.
+    pub wav_info: Option<WavInfo>,
+    /// Severity-classified diagnostic. `None` = clean file.
+    pub diagnostic: Option<Diagnostic>,
+}
+
+/// File-level diagnostic. We surface these in the source-files pane.
+///
+///   - `Warning`: file is technically out-of-spec but BandMate plays it.
+///     User should re-bounce when convenient; not blocking.
+///   - `Error`: file cannot be used (stereo, totally corrupt, etc.).
+#[derive(Debug, Serialize)]
+#[serde(tag = "severity", rename_all = "lowercase")]
+pub enum Diagnostic {
+    Warning { message: String },
+    Error { message: String },
+}
+
+/// List `*.wav` and `*.mid` files in a folder, with WAV header info.
+///
+/// One Tauri call returns everything the source-files pane needs: the
+/// filenames, full paths, and (for WAVs) the channel count and duration
+/// so we can flag stereo files in the UI without N more roundtrips.
+#[tauri::command]
+fn list_audio_files(folder: String) -> Result<Vec<AudioFileInfo>, String> {
+    let folder_path = Path::new(&folder);
+    if !folder_path.is_dir() {
+        return Err(format!("Not a directory: {}", folder));
+    }
+
+    let mut out = Vec::new();
+    for entry in
+        fs::read_dir(folder_path).map_err(|e| format!("Cannot read {}: {}", folder, e))?
+    {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let filename = match path.file_name().and_then(|n| n.to_str()) {
+            Some(n) => n.to_string(),
+            None => continue,
+        };
+        // Skip macOS hidden / AppleDouble files. Stock BM Loader includes
+        // these in red — we just hide them entirely. dot_clean is the
+        // long-term fix.
+        if filename.starts_with('.') || filename.starts_with("._") {
+            continue;
+        }
+        let ext_lower = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|s| s.to_ascii_lowercase());
+        let kind = match ext_lower.as_deref() {
+            Some("wav") => "wav",
+            Some("mid") => "mid",
+            _ => continue,
+        };
+
+        let path_str = path.to_string_lossy().to_string();
+
+        let (wav_info, diagnostic) = if kind == "wav" {
+            probe_wav_with_diagnostic(&path)
+        } else {
+            (None, None)
+        };
+
+        out.push(AudioFileInfo {
+            filename,
+            path: path_str,
+            kind: kind.to_string(),
+            wav_info,
+            diagnostic,
+        });
+    }
+
+    out.sort_by(|a, b| a.filename.to_lowercase().cmp(&b.filename.to_lowercase()));
+    Ok(out)
+}
+
+/// Probe a WAV file with severity classification. The strict path
+/// (hound) handles clean files. If hound rejects the file with a
+/// recoverable error — specifically the data-chunk-length mismatch
+/// that the BandMate hardware tolerates — we fall back to a manual
+/// header parse that extracts the spec anyway, and tag the result as
+/// a `Warning` so the UI can surface it without blocking the user.
+///
+/// Hard errors (corrupt fmt chunk, missing chunks, non-WAVE files,
+/// I/O failure) come back as `Error` with no `WavInfo`.
+fn probe_wav_with_diagnostic(path: &Path) -> (Option<WavInfo>, Option<Diagnostic>) {
+    match hound::WavReader::open(path) {
+        Ok(reader) => {
+            let spec = reader.spec();
+            let duration_samples = u64::from(reader.duration());
+            let duration_seconds = duration_samples as f64 / f64::from(spec.sample_rate);
+            (
+                Some(WavInfo {
+                    channels: spec.channels,
+                    sample_rate: spec.sample_rate,
+                    bit_depth: spec.bits_per_sample,
+                    duration_samples,
+                    duration_seconds,
+                }),
+                None,
+            )
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            // The "data chunk length is not a multiple of sample size"
+            // error means the file ends mid-sample (typically from a
+            // region cut export). hound is strict; libsndfile (what
+            // the BandMate runs) is lenient and just truncates. Eric
+            // confirmed these files play fine on the unit, so we
+            // demote to a Warning and recover the metadata via a
+            // manual header parse.
+            if msg.contains("data chunk length is not a multiple") {
+                if let Ok(info) = read_wav_header_lenient(path) {
+                    return (
+                        Some(info),
+                        Some(Diagnostic::Warning { message: msg }),
+                    );
+                }
+            }
+            (None, Some(Diagnostic::Error { message: msg }))
+        }
+    }
+}
+
+/// Manual minimal WAV header parser. Used as a fallback when hound's
+/// strict validation rejects an otherwise-recoverable file. We walk
+/// the RIFF chunks, pull `fmt ` for the spec and `data` for the
+/// length, and compute duration as `data_size / frame_size` (rounded
+/// down — same thing libsndfile does for these files).
+fn read_wav_header_lenient(path: &Path) -> Result<WavInfo, String> {
+    let mut f = File::open(path).map_err(|e| e.to_string())?;
+    let mut riff = [0u8; 12];
+    f.read_exact(&mut riff).map_err(|e| e.to_string())?;
+    if &riff[0..4] != b"RIFF" || &riff[8..12] != b"WAVE" {
+        return Err("not a RIFF/WAVE file".into());
+    }
+
+    let mut channels: u16 = 0;
+    let mut sample_rate: u32 = 0;
+    let mut bits_per_sample: u16 = 0;
+    let mut data_size: u32 = 0;
+    let mut found_fmt = false;
+    let mut found_data = false;
+
+    loop {
+        let mut header = [0u8; 8];
+        if f.read_exact(&mut header).is_err() {
+            break;
+        }
+        let chunk_id = &header[0..4];
+        let chunk_size =
+            u32::from_le_bytes([header[4], header[5], header[6], header[7]]);
+
+        if chunk_id == b"fmt " {
+            // PCM `fmt ` is 16 bytes; some WAVs use 18 or 40 (for
+            // WAVE_FORMAT_EXTENSIBLE). We only need the first 16.
+            let to_read = chunk_size.min(40) as usize;
+            let mut fmt_buf = vec![0u8; to_read];
+            f.read_exact(&mut fmt_buf).map_err(|e| e.to_string())?;
+            if fmt_buf.len() >= 16 {
+                channels = u16::from_le_bytes([fmt_buf[2], fmt_buf[3]]);
+                sample_rate = u32::from_le_bytes([
+                    fmt_buf[4], fmt_buf[5], fmt_buf[6], fmt_buf[7],
+                ]);
+                bits_per_sample = u16::from_le_bytes([fmt_buf[14], fmt_buf[15]]);
+                found_fmt = true;
+            }
+            // Skip any remaining fmt-chunk bytes beyond what we read.
+            let leftover = chunk_size as i64 - to_read as i64;
+            if leftover > 0 {
+                f.seek(SeekFrom::Current(leftover))
+                    .map_err(|e| e.to_string())?;
+            }
+            // RIFF chunks are padded to even byte alignment.
+            if chunk_size % 2 == 1 {
+                f.seek(SeekFrom::Current(1)).map_err(|e| e.to_string())?;
+            }
+        } else if chunk_id == b"data" {
+            data_size = chunk_size;
+            found_data = true;
+            break; // We have everything we need.
+        } else {
+            // Skip unknown chunks (LIST/INFO etc.).
+            f.seek(SeekFrom::Current(chunk_size as i64))
+                .map_err(|e| e.to_string())?;
+            if chunk_size % 2 == 1 {
+                f.seek(SeekFrom::Current(1)).map_err(|e| e.to_string())?;
+            }
+        }
+    }
+
+    if !found_fmt {
+        return Err("missing fmt chunk".into());
+    }
+    if !found_data {
+        return Err("missing data chunk".into());
+    }
+
+    let bytes_per_sample = u32::from(bits_per_sample) / 8;
+    let frame_size = u32::from(channels) * bytes_per_sample;
+    let duration_samples = if frame_size > 0 {
+        u64::from(data_size / frame_size)
+    } else {
+        0
+    };
+    let duration_seconds = if sample_rate > 0 {
+        duration_samples as f64 / f64::from(sample_rate)
+    } else {
+        0.0
+    };
+
+    Ok(WavInfo {
+        channels,
+        sample_rate,
+        bit_depth: bits_per_sample,
+        duration_samples,
+        duration_seconds,
+    })
+}
+
+/// Copy a file into a folder. Returns the destination path on success.
+///
+/// If a file with the same name already exists in the destination, it's
+/// overwritten (matches BM Loader's behavior — re-bouncing a track in
+/// your DAW and re-copying just updates the song folder's copy).
+#[tauri::command]
+fn copy_into_folder(src: String, dest_dir: String) -> Result<String, String> {
+    let src_path = Path::new(&src);
+    let dest_dir_path = Path::new(&dest_dir);
+    if !src_path.is_file() {
+        return Err(format!("Source is not a file: {}", src));
+    }
+    if !dest_dir_path.is_dir() {
+        // Create it if missing — convenient for new-song flow where the
+        // folder hasn't been written yet.
+        fs::create_dir_all(dest_dir_path)
+            .map_err(|e| format!("Cannot create dest dir {}: {}", dest_dir, e))?;
+    }
+    let filename = src_path
+        .file_name()
+        .ok_or_else(|| format!("Source has no filename: {}", src))?;
+    let dest_path = dest_dir_path.join(filename);
+    fs::copy(src_path, &dest_path)
+        .map_err(|e| format!("Cannot copy {} → {}: {}", src, dest_path.display(), e))?;
+    Ok(dest_path.to_string_lossy().to_string())
+}
+
+/// Check whether a file already exists. Used by the song editor to
+/// decide whether a newly-assigned file needs copying into the song
+/// folder (vs. one that's already there).
+#[tauri::command]
+fn file_exists(path: String) -> bool {
+    Path::new(&path).is_file()
+}
+
+// ---------------------------------------------------------------------------
 // Tauri runtime entry
 // ---------------------------------------------------------------------------
 
@@ -252,6 +530,9 @@ pub fn run() {
             scan_working_folder,
             read_text_file,
             write_text_file,
+            list_audio_files,
+            copy_into_folder,
+            file_exists,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

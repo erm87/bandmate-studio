@@ -39,3 +39,33 @@ export interface ScanResult {
   playlists: PlaylistSummary[];
   trackMaps: TrackMapSummary[];
 }
+
+/**
+ * One entry returned by `list_audio_files`. Includes WAV header info
+ * baked in so the frontend can decide stereo / mono / playable
+ * without a second roundtrip per file.
+ *
+ * The `diagnostic` field carries severity-classified probe results:
+ *   - null:     clean file, no issues
+ *   - warning:  technically out-of-spec but the BandMate plays it
+ *               (e.g., region-cut WAVs where the data chunk length
+ *               isn't a clean multiple of the sample size). `wavInfo`
+ *               IS populated for warning files via a lenient header
+ *               fallback.
+ *   - error:    file cannot be used (stereo, missing fmt chunk,
+ *               unreadable, etc.). `wavInfo` is null.
+ */
+export interface AudioFileInfo {
+  filename: string;
+  path: string;
+  /** Lowercased extension: "wav" or "mid". */
+  kind: "wav" | "mid";
+  /** Populated for clean and warning-class WAV files; null for MIDI or hard errors. */
+  wavInfo: import("../codec/types").WavInfo | null;
+  /** Severity-classified probe result. */
+  diagnostic: Diagnostic | null;
+}
+
+export type Diagnostic =
+  | { severity: "warning"; message: string }
+  | { severity: "error"; message: string };

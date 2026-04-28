@@ -12,7 +12,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { open } from "@tauri-apps/plugin-dialog";
-import type { ScanResult } from "./types";
+import type { AudioFileInfo, ScanResult } from "./types";
 
 /**
  * Show the native folder picker. Returns the chosen absolute path,
@@ -63,4 +63,34 @@ export async function readTextFile(path: string): Promise<string> {
  */
 export async function writeTextFile(path: string, content: string): Promise<void> {
   await invoke<void>("write_text_file", { path, content });
+}
+
+// ---------------------------------------------------------------------------
+// Source-files-pane support (Phase 3)
+// ---------------------------------------------------------------------------
+
+/**
+ * List `*.wav` and `*.mid` files in `folder`, with WAV header info
+ * baked in for each WAV. One roundtrip vs. N per file.
+ */
+export async function listAudioFiles(folder: string): Promise<AudioFileInfo[]> {
+  return invoke<AudioFileInfo[]>("list_audio_files", { folder });
+}
+
+/**
+ * Copy a file into a folder. Overwrites if a file with the same name
+ * already exists. Creates `destDir` if missing.
+ *
+ * Returns the destination path on success.
+ */
+export async function copyIntoFolder(
+  src: string,
+  destDir: string,
+): Promise<string> {
+  return invoke<string>("copy_into_folder", { src, destDir });
+}
+
+/** True if a file exists at the given path. */
+export async function fileExists(path: string): Promise<boolean> {
+  return invoke<boolean>("file_exists", { path });
 }
