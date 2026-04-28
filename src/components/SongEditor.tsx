@@ -59,12 +59,15 @@ interface PendingCopy {
   sourcePath: string;
   filename: string;
   /**
-   * The WAV's actual sample rate at click time. Captured here because
-   * the file isn't yet in the song folder, so the song-folder probe
-   * doesn't know about it. Used to flag rate-mismatch in the channel
-   * grid even before the save-time copy happens.
+   * The WAV's metadata at click time. Captured here because the file
+   * isn't yet in the song folder, so the song-folder probe doesn't
+   * know about it. Used both to flag rate-mismatch in the channel
+   * grid AND to populate the row tooltip / drag-image label with the
+   * track's spec line ("44.1 kHz · mono · 3:21").
    */
   sampleRate: number;
+  channels: number;
+  durationSeconds: number;
 }
 
 interface EditorSnapshot {
@@ -190,7 +193,7 @@ const EMPTY_EDITOR: EditorState = {
 };
 
 export function SongEditor({ jcsPath }: Props) {
-  const { state, dispatch, rescan } = useAppState();
+  const { state, dispatch, rescan, registerDirtyEditor } = useAppState();
 
   const [editor, setEditor] = useState<EditorState>(EMPTY_EDITOR);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -364,34 +367,61 @@ export function SongEditor({ jcsPath }: Props) {
   }, [draftSong, songFolder]);
 
   /**
-   * Per-channel sample-rate map. For each audio file in the song:
+   * Per-channel WAV metadata, keyed by channel index. For each audio
+   * file in the song:
    *   - If the channel has a pendingCopy (file lives outside the song
-   *     folder, queued for save), use the rate captured at click time.
+   *     folder, queued for save), use the metadata captured at click
+   *     time.
    *   - Else, look up the file by name in the song folder's listing.
    *
-   * Channels with no entry have an unknown rate — usually means the
+   * Channels with no entry have unknown metadata — usually the
    * folder probe hasn't completed yet, or the assigned filename
    * doesn't actually exist on disk.
+   *
+   * Used for: rate-mismatch flag (sampleRate vs songRate), row
+   * tooltips ("44.1 kHz · mono · 3:21"), and drag-image label.
    */
-  const channelSampleRates = useMemo(() => {
-    const m = new Map<number, number>();
+  const channelMeta = useMemo(() => {
+    const m = new Map<
+      number,
+      { sampleRate: number; channels: number; durationSeconds: number }
+    >();
     if (!draftSong || !editor.current) return m;
     const byName = new Map<string, AudioFileInfo>();
     for (const f of folderFiles) byName.set(f.filename, f);
     for (const audio of draftSong.audioFiles) {
       const pending = editor.current.pendingCopies.get(audio.channel);
       if (pending) {
-        m.set(audio.channel, pending.sampleRate);
+        m.set(audio.channel, {
+          sampleRate: pending.sampleRate,
+          channels: pending.channels,
+          durationSeconds: pending.durationSeconds,
+        });
         continue;
       }
       const probed = byName.get(audio.filename);
-      const rate = probed?.wavInfo?.sampleRate;
-      if (rate !== undefined && rate > 0) {
-        m.set(audio.channel, rate);
+      const wav = probed?.wavInfo;
+      if (wav && wav.sampleRate > 0) {
+        m.set(audio.channel, {
+          sampleRate: wav.sampleRate,
+          channels: wav.channels,
+          durationSeconds: wav.durationSeconds,
+        });
       }
     }
     return m;
   }, [draftSong, editor, folderFiles]);
+
+  /**
+   * Channel sample rate only — the legacy view used by the
+   * rate-mismatch flag in the channel grid header. Derived from
+   * `channelMeta` so we have a single source of truth.
+   */
+  const channelSampleRates = useMemo(() => {
+    const m = new Map<number, number>();
+    for (const [ch, meta] of channelMeta) m.set(ch, meta.sampleRate);
+    return m;
+  }, [channelMeta]);
 
   // ---- Auto-load the first track map --------------------------------------
   useEffect(() => {
@@ -539,6 +569,8 @@ export function SongEditor({ jcsPath }: Props) {
               sourcePath: file.path,
               filename: file.filename,
               sampleRate: file.wavInfo?.sampleRate ?? 0,
+              channels: file.wavInfo?.channels ?? 1,
+              durationSeconds: file.wavInfo?.durationSeconds ?? 0,
             });
           }
         }
@@ -646,6 +678,57 @@ export function SongEditor({ jcsPath }: Props) {
   );
 
   /**
+   * Swap the assignments at two channels (audio only — MIDI stays at
+   * slot 24). Used by the on-row ↑ / ↓ buttons and the Cmd+Arrow
+   * keyboard shortcuts. Distinct from `handleMoveChannel` which is
+   * a one-way move with cascade-shift semantics; swap is symmetric
+   * and doesn't touch any other channels.
+   *
+   * No-ops when either side is the MIDI slot or out of range, or
+   * when both sides are empty (nothing to swap).
+   */
+  const handleSwapChannels = useCallback(
+    (a: number, b: number) => {
+      if (a === b) return;
+      if (a === MIDI_CHANNEL_INDEX || b === MIDI_CHANNEL_INDEX) return;
+      if (a < 0 || b < 0) return;
+      if (a >= MIDI_CHANNEL_INDEX || b >= MIDI_CHANNEL_INDEX) return;
+      applyEdit((snap) => {
+        const fileA = snap.song.audioFiles.find((f) => f.channel === a);
+        const fileB = snap.song.audioFiles.find((f) => f.channel === b);
+        if (!fileA && !fileB) return snap;
+        const others = snap.song.audioFiles.filter(
+          (f) => f.channel !== a && f.channel !== b,
+        );
+        const updated = [...others];
+        if (fileA) updated.push({ ...fileA, channel: b });
+        if (fileB) updated.push({ ...fileB, channel: a });
+        updated.sort((x, y) => x.channel - y.channel);
+        // Swap pending-copy entries by re-keying.
+        const nextPending = new Map(snap.pendingCopies);
+        const copyA = nextPending.get(a);
+        const copyB = nextPending.get(b);
+        nextPending.delete(a);
+        nextPending.delete(b);
+        if (copyA) nextPending.set(b, copyA);
+        if (copyB) nextPending.set(a, copyB);
+        return {
+          song: { ...snap.song, audioFiles: updated },
+          pendingCopies: nextPending,
+        };
+      });
+      // Selection follows the moved row so the user can chain swaps
+      // without re-clicking.
+      if (state.channelSelection === a) {
+        dispatch({ type: "select_channel", channel: b });
+      } else if (state.channelSelection === b) {
+        dispatch({ type: "select_channel", channel: a });
+      }
+    },
+    [applyEdit, dispatch, state.channelSelection],
+  );
+
+  /**
    * Update the per-song source folder — both in local state (for the
    * source pane) and in the on-disk sidecar (so it persists). Failures
    * are surfaced via saveError; we don't want a silent persistence
@@ -689,6 +772,18 @@ export function SongEditor({ jcsPath }: Props) {
       editor.current.pendingCopies.size > 0
     );
   }, [editor]);
+
+  // Register dirty state so the unsaved-changes guard can intercept
+  // sidebar clicks / ESC. We use a ref to read the latest isDirty
+  // value without retriggering the registration on every change.
+  const isDirtyRef = useRef(isDirty);
+  isDirtyRef.current = isDirty;
+  useEffect(() => {
+    return registerDirtyEditor({
+      isDirty: () => isDirtyRef.current,
+      label: songName,
+    });
+  }, [registerDirtyEditor, songName]);
 
   const canUndo = editor.past.length > 0;
   const canRedo = editor.future.length > 0;
@@ -813,6 +908,28 @@ export function SongEditor({ jcsPath }: Props) {
         redo();
         return;
       }
+      // Cmd/Ctrl + Arrow — swap the highlighted channel with the
+      // adjacent one. Audio only (MIDI's slot is fixed at index 24).
+      // Skipped when focus is in an input so it doesn't fight text
+      // caret moves inside, e.g., the New Song dialog.
+      if (meta && (e.key === "ArrowUp" || e.key === "ArrowDown")) {
+        const target = e.target as HTMLElement | null;
+        const tag = target?.tagName?.toLowerCase();
+        if (
+          tag === "input" ||
+          tag === "textarea" ||
+          tag === "select" ||
+          target?.isContentEditable
+        ) {
+          return;
+        }
+        const sel = state.channelSelection;
+        if (sel === null || sel === MIDI_CHANNEL_INDEX) return;
+        e.preventDefault();
+        const delta = e.key === "ArrowUp" ? -1 : 1;
+        handleSwapChannels(sel, sel + delta);
+        return;
+      }
       // Delete / Backspace — clear selected channel's assignment
       if (e.key === "Delete" || e.key === "Backspace") {
         const target = e.target as HTMLElement | null;
@@ -833,7 +950,14 @@ export function SongEditor({ jcsPath }: Props) {
     };
     window.addEventListener("keydown", onKeydown);
     return () => window.removeEventListener("keydown", onKeydown);
-  }, [handleSave, handleClearChannel, undo, redo, state.channelSelection]);
+  }, [
+    handleSave,
+    handleClearChannel,
+    handleSwapChannels,
+    undo,
+    redo,
+    state.channelSelection,
+  ]);
 
   // ---- Render -------------------------------------------------------------
 
@@ -888,12 +1012,15 @@ export function SongEditor({ jcsPath }: Props) {
             draftSong.lengthSamples / draftSong.sampleRate
           }
           channelSampleRates={channelSampleRates}
+          channelMeta={channelMeta}
           selectedChannel={state.channelSelection}
           onSelectChannel={handleSelectChannel}
           onDropFile={(file, channel, mode) =>
             handleSelectSourceFile(file, channel, mode)
           }
           onMoveChannel={handleMoveChannel}
+          onSwapChannel={handleSwapChannels}
+          onClearChannel={handleClearChannel}
         />
         <SourceFilesPane
           songFolder={songFolder}

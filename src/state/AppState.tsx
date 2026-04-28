@@ -17,9 +17,11 @@ import {
   useEffect,
   useMemo,
   useReducer,
+  useRef,
   type Dispatch,
   type ReactNode,
 } from "react";
+import { ask } from "@tauri-apps/plugin-dialog";
 
 import { initAndScan, pickFolder } from "../fs/workingFolder";
 import type { ScanResult } from "../fs/types";
@@ -175,6 +177,21 @@ function reducer(state: AppState, action: AppAction): AppState {
 // Context
 // ---------------------------------------------------------------------------
 
+/**
+ * What an editor needs to register so the unsaved-changes guard can
+ * intercept nav-aways. Editors call `registerDirtyEditor` from a
+ * useEffect that returns the unregister function.
+ */
+export interface DirtyEditorRegistration {
+  /** True if the editor's draft differs from disk. */
+  isDirty: () => boolean;
+  /**
+   * Optional human-readable label for the dialog (e.g. "Buffy" or
+   * "May v3.jcp"). Falls back to a generic message if absent.
+   */
+  label?: string;
+}
+
 interface AppContextValue {
   state: AppState;
   dispatch: Dispatch<AppAction>;
@@ -185,6 +202,22 @@ interface AppContextValue {
   rescan: () => Promise<void>;
   /** Forget the current working folder (returns to first-run empty state). */
   clearWorkingFolder: () => void;
+  /**
+   * Editors call this from a useEffect to advertise their dirty
+   * state. Returns an unregister function. Only the most recently
+   * registered editor's state is consulted.
+   */
+  registerDirtyEditor: (reg: DirtyEditorRegistration) => () => void;
+  /**
+   * Async wrapper around the `select` / `clear_selection` actions.
+   * If a registered dirty editor reports unsaved changes, this shows
+   * a Discard / Cancel confirm and aborts the navigation if the user
+   * cancels. Use these instead of dispatching the raw actions when
+   * navigation comes from user input (sidebar click, ESC, etc.).
+   */
+  requestSelect: (selection: Selection) => Promise<void>;
+  /** Companion to `requestSelect` for clearing the current selection. */
+  requestClearSelection: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -239,9 +272,88 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     dispatch({ type: "clear_working_folder" });
   }, []);
 
+  // ---- Unsaved-changes guard --------------------------------------------
+  //
+  // Ref-based registry: the currently-mounted editor reports its
+  // dirty status via `registerDirtyEditor`. We only ever have one
+  // editor mounted at a time (sidebar selection picks the kind), so
+  // a single ref is sufficient. Returning an unregister fn that the
+  // editor calls in its cleanup keeps the ref accurate even if a
+  // re-render causes a new registration.
+  const dirtyEditorRef = useRef<DirtyEditorRegistration | null>(null);
+
+  const registerDirtyEditor = useCallback(
+    (reg: DirtyEditorRegistration) => {
+      dirtyEditorRef.current = reg;
+      return () => {
+        if (dirtyEditorRef.current === reg) {
+          dirtyEditorRef.current = null;
+        }
+      };
+    },
+    [],
+  );
+
+  /**
+   * Show the unsaved-changes confirm if the registered editor is
+   * dirty. Returns true if it's safe to proceed with the navigation
+   * (no dirty editor, or user clicked Discard); false to abort.
+   */
+  const confirmDiscardIfDirty = useCallback(async (): Promise<boolean> => {
+    const reg = dirtyEditorRef.current;
+    if (!reg || !reg.isDirty()) return true;
+    const labelLine = reg.label ? `\n\n"${reg.label}" has unsaved changes.` : "";
+    return await ask(
+      `You have unsaved changes.${labelLine}\n\nDiscard them and continue? Saving first means cancelling and pressing ⌘S, then navigating again.`,
+      {
+        title: "Unsaved changes",
+        kind: "warning",
+        okLabel: "Discard",
+        cancelLabel: "Cancel",
+      },
+    );
+  }, []);
+
+  const requestSelect = useCallback(
+    async (selection: Selection) => {
+      // Re-selecting the already-selected item is a no-op — don't
+      // bother prompting.
+      const cur = state.selection;
+      if (cur && sameSelection(cur, selection)) return;
+      const ok = await confirmDiscardIfDirty();
+      if (!ok) return;
+      dispatch({ type: "select", selection });
+    },
+    [confirmDiscardIfDirty, state.selection],
+  );
+
+  const requestClearSelection = useCallback(async () => {
+    if (!state.selection) return;
+    const ok = await confirmDiscardIfDirty();
+    if (!ok) return;
+    dispatch({ type: "clear_selection" });
+  }, [confirmDiscardIfDirty, state.selection]);
+
   const value = useMemo<AppContextValue>(
-    () => ({ state, dispatch, chooseWorkingFolder, rescan, clearWorkingFolder }),
-    [state, chooseWorkingFolder, rescan, clearWorkingFolder],
+    () => ({
+      state,
+      dispatch,
+      chooseWorkingFolder,
+      rescan,
+      clearWorkingFolder,
+      registerDirtyEditor,
+      requestSelect,
+      requestClearSelection,
+    }),
+    [
+      state,
+      chooseWorkingFolder,
+      rescan,
+      clearWorkingFolder,
+      registerDirtyEditor,
+      requestSelect,
+      requestClearSelection,
+    ],
   );
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
@@ -261,3 +373,16 @@ export function useAppState(): AppContextValue {
 
 // Re-export for tests / external introspection
 export { reducer as _reducerForTests, INITIAL_STATE as _initialStateForTests };
+
+// ---------------------------------------------------------------------------
+// Selection helpers
+// ---------------------------------------------------------------------------
+
+/** True if two selections refer to the same sidebar item. */
+function sameSelection(a: Selection, b: Selection): boolean {
+  if (a.kind !== b.kind) return false;
+  if (a.kind === "song" && b.kind === "song") return a.jcsPath === b.jcsPath;
+  if (a.kind === "playlist" && b.kind === "playlist") return a.path === b.path;
+  if (a.kind === "trackMap" && b.kind === "trackMap") return a.path === b.path;
+  return false;
+}

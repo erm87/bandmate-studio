@@ -43,7 +43,8 @@ export type BmsDragPayload =
   | { kind: "source-file"; file: AudioFileInfo }
   | { kind: "channel-move"; sourceChannel: number }
   | { kind: "playlist-row"; from: number }
-  | { kind: "available-song"; folderName: string };
+  | { kind: "available-song"; folderName: string }
+  | { kind: "trackmap-row"; from: number };
 
 /**
  * Serialize a payload onto a DataTransfer object. Call from `onDragStart`.
@@ -70,7 +71,9 @@ export function setDragPayload(
     // text/plain should always succeed, but defensive.
   }
   e.dataTransfer.effectAllowed =
-    payload.kind === "playlist-row" || payload.kind === "channel-move"
+    payload.kind === "playlist-row" ||
+    payload.kind === "channel-move" ||
+    payload.kind === "trackmap-row"
       ? "move"
       : "copy";
 }

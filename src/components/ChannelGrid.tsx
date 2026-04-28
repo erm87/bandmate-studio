@@ -48,6 +48,12 @@ interface Props {
    * flag mismatches against the song's selected sample rate.
    */
   channelSampleRates: Map<number, number>;
+  /**
+   * Per-channel full WAV metadata (sample rate + channel count + duration).
+   * Used for the row's hover tooltip + the drag-image label so the
+   * user can see the track spec at a glance.
+   */
+  channelMeta: Map<number, ChannelMeta>;
   /** Currently-selected channel index, or null if none. */
   selectedChannel: number | null;
   /** Toggle selection of a channel. Pass `null` to clear. */
@@ -75,6 +81,17 @@ interface Props {
    * channels, mode is always "replace" (which is just a move).
    */
   onMoveChannel: (from: number, to: number, mode: DropMode) => void;
+  /**
+   * Swap the assignments at two adjacent channels. Used by the on-row
+   * ↑ / ↓ buttons that appear when a channel is selected. Symmetric
+   * (no cascade); both files keep their level / pan / mute.
+   */
+  onSwapChannel: (a: number, b: number) => void;
+  /**
+   * Clear the assignment at the selected channel. Used by the on-row
+   * × button. Same handler as the Delete/Backspace shortcut.
+   */
+  onClearChannel: () => void;
 }
 
 /**
@@ -92,13 +109,45 @@ export type DropMode = "replace" | "shiftUp" | "shiftDown";
  *  occupied row. Outside these strips, the zone is "replace". */
 const SHIFT_EDGE_PX = 8;
 
+/**
+ * WAV-derived per-channel metadata used for tooltips + drag preview.
+ *
+ *   - sampleRate: Hz
+ *   - channels: 1 (mono), 2 (stereo) — stereo is rejected at assign time
+ *     but we surface the value here in case it slipped past
+ *   - durationSeconds: track length in seconds
+ */
+export interface ChannelMeta {
+  sampleRate: number;
+  channels: number;
+  durationSeconds: number;
+}
+
+/**
+ * Format a `ChannelMeta` as a one-line spec string, e.g.
+ * "44.1 kHz · mono · 3:21". Returns empty string if no meta —
+ * caller substitutes a fallback like just the filename.
+ */
+function formatMetaLine(meta: ChannelMeta | undefined): string {
+  if (!meta) return "";
+  const seconds = Math.max(0, Math.floor(meta.durationSeconds));
+  const mm = Math.floor(seconds / 60);
+  const ss = (seconds % 60).toString().padStart(2, "0");
+  const chLabel = meta.channels === 1 ? "mono" : `${meta.channels}ch`;
+  return `${(meta.sampleRate / 1000).toFixed(1)} kHz · ${chLabel} · ${mm}:${ss}`;
+}
+
 // Column template:
-//   Ch # | Label | (icon slot) | File | Lvl | Pan | (delete slot)
+//   Ch # | Label | (icon slot) | File | Lvl | Pan | (action slot)
 //
 // The 16px icon slot between Label and File is always rendered, even
 // for rows without the longest indicator, so filenames in the File
 // column are left-aligned at the same x-position regardless.
-const COLS = "grid-cols-[32px_110px_16px_1fr_40px_40px_24px]";
+//
+// The trailing 72px slot holds the on-row ↑ / ↓ / × buttons that
+// appear when the row is selected. It's reserved at all times so
+// rows don't reflow when selection moves.
+const COLS = "grid-cols-[32px_110px_16px_1fr_40px_40px_72px]";
 
 /** Format a duration in seconds as `m:ss` (zero-padded seconds). */
 function formatDuration(totalSeconds: number): string {
@@ -114,10 +163,13 @@ export function ChannelGrid({
   longestFilename,
   longestDurationSeconds,
   channelSampleRates,
+  channelMeta,
   selectedChannel,
   onSelectChannel,
   onDropFile,
   onMoveChannel,
+  onSwapChannel,
+  onClearChannel,
 }: Props) {
   const longestDurationLabel = formatDuration(longestDurationSeconds);
   const audioByChannel = new Map<number, Song["audioFiles"][number]>();
@@ -292,6 +344,7 @@ export function ChannelGrid({
                 dragMode={dragMode}
                 dragBlocked={dragBlocked}
                 onClick={() => handleToggle(idx)}
+                onClear={onClearChannel}
                 dndProps={dndProps}
               />
             );
@@ -323,7 +376,10 @@ export function ChannelGrid({
               isDragOver={isDragOver}
               dragMode={dragMode}
               dragBlocked={dragBlocked}
+              meta={channelMeta.get(idx)}
               onClick={() => handleToggle(idx)}
+              onSwap={onSwapChannel}
+              onClear={onClearChannel}
               dndProps={dndProps}
             />
           );
@@ -353,7 +409,10 @@ function AudioRow({
   isDragOver,
   dragMode,
   dragBlocked,
+  meta,
   onClick,
+  onSwap,
+  onClear,
   dndProps,
 }: {
   index: number;
@@ -373,7 +432,13 @@ function AudioRow({
   dragMode: DropMode | null;
   /** When `dragMode` is a shift, whether the cascade has nowhere to land. */
   dragBlocked: boolean;
+  /** Cached WAV metadata for this row's assignment, if known. */
+  meta: ChannelMeta | undefined;
   onClick: () => void;
+  /** Swap this channel's assignment with another channel's. */
+  onSwap: (a: number, b: number) => void;
+  /** Clear this channel's assignment. */
+  onClear: () => void;
   dndProps: {
     onDragOver: (e: React.DragEvent) => void;
     onDrop: (e: React.DragEvent) => void;
@@ -394,10 +459,14 @@ function AudioRow({
       onDragStart={(e) => {
         if (!isAssigned) return;
         setDragPayload(e, { kind: "channel-move", sourceChannel: index });
-        // Custom drag image — just the filename, not the whole row
-        // with its #/label/lvl/pan columns. Keeps the ghost compact
-        // and on-message ("you're dragging this file").
-        setDragImageLabel(e, filename ?? "");
+        // Custom drag image — filename + spec line so the user
+        // can see what they're dragging at a glance. Falls back to
+        // just the filename if metadata hasn't loaded yet.
+        const metaLine = formatMetaLine(meta);
+        const ghostLabel = metaLine
+          ? `${filename}  ·  ${metaLine}`
+          : (filename ?? "");
+        setDragImageLabel(e, ghostLabel);
       }}
       {...dndProps}
       className={cn(
@@ -497,13 +566,22 @@ function AudioRow({
       </span>
       <span
         className="user-text truncate font-mono text-xs"
-        title={
-          hasRateMismatch
-            ? `${filename}\n\n${rateMismatchTooltip}`
-            : isLongest
-              ? `${filename}\n\n${longestTooltip}`
-              : (filename ?? "")
-        }
+        title={(() => {
+          // Tooltip content stacks: filename → spec line ("44.1 kHz ·
+          // mono · 3:21") → severity / longest annotation if any.
+          const metaLine = formatMetaLine(meta);
+          const lines: string[] = [];
+          if (filename) lines.push(filename);
+          if (metaLine) lines.push(metaLine);
+          if (hasRateMismatch) {
+            lines.push("");
+            lines.push(rateMismatchTooltip);
+          } else if (isLongest) {
+            lines.push("");
+            lines.push(longestTooltip);
+          }
+          return lines.join("\n");
+        })()}
       >
         {isAssigned ? (
           <span
@@ -539,7 +617,48 @@ function AudioRow({
       >
         {pan !== null ? pan.toFixed(1) : "—"}
       </span>
-      <span />
+      {/* Trailing slot: on-row ↑ / ↓ / × buttons appear here when the
+          row is selected and has an assignment. Clicks stop propagating
+          so they don't toggle the row's selection. */}
+      <span className="flex items-center justify-end gap-0.5">
+        {isSelected && isAssigned && (
+          <>
+            <RowActionButton
+              onClick={(e) => {
+                e.stopPropagation();
+                onSwap(index, index - 1);
+              }}
+              disabled={index === 0}
+              title="Move up (⌘↑)"
+              ariaLabel="Move up"
+            >
+              <ArrowUpIcon className="h-3 w-3" />
+            </RowActionButton>
+            <RowActionButton
+              onClick={(e) => {
+                e.stopPropagation();
+                onSwap(index, index + 1);
+              }}
+              disabled={index === MIDI_CHANNEL_INDEX - 1}
+              title="Move down (⌘↓)"
+              ariaLabel="Move down"
+            >
+              <ArrowDownIcon className="h-3 w-3" />
+            </RowActionButton>
+            <RowActionButton
+              onClick={(e) => {
+                e.stopPropagation();
+                onClear();
+              }}
+              title="Clear assignment (Delete)"
+              ariaLabel="Clear assignment"
+              danger
+            >
+              <CloseIcon className="h-3 w-3" />
+            </RowActionButton>
+          </>
+        )}
+      </span>
     </button>
   );
 }
@@ -651,6 +770,65 @@ function ArrowDownIcon({ className }: { className?: string }) {
   );
 }
 
+/**
+ * Square icon button used for the on-row ↑ / ↓ / × actions when a
+ * channel is selected. Brand-color hover for moves, red for the
+ * destructive clear action. Disabled state for boundary moves.
+ */
+function RowActionButton({
+  children,
+  onClick,
+  disabled,
+  title,
+  ariaLabel,
+  danger,
+}: {
+  children: React.ReactNode;
+  onClick: (e: React.MouseEvent) => void;
+  disabled?: boolean;
+  title: string;
+  ariaLabel: string;
+  danger?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={disabled}
+      title={title}
+      aria-label={ariaLabel}
+      className={cn(
+        "flex h-5 w-5 items-center justify-center rounded transition",
+        disabled
+          ? "cursor-not-allowed text-zinc-300 dark:text-zinc-700"
+          : danger
+            ? "text-red-500 hover:bg-red-100 hover:text-red-700 dark:text-red-400 dark:hover:bg-red-950 dark:hover:text-red-300"
+            : "text-brand-600 hover:bg-brand-100 hover:text-brand-700 dark:text-brand-300 dark:hover:bg-brand-900 dark:hover:text-brand-100",
+      )}
+    >
+      {children}
+    </button>
+  );
+}
+
+/** Small "×" close glyph. */
+function CloseIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={className}
+    >
+      <path d="M4 4l8 8M12 4l-8 8" />
+    </svg>
+  );
+}
+
 function NoEntryIcon({ className }: { className?: string }) {
   return (
     <svg
@@ -729,6 +907,7 @@ function MidiRow({
   dragMode,
   dragBlocked,
   onClick,
+  onClear,
   dndProps,
 }: {
   label: string;
@@ -738,6 +917,8 @@ function MidiRow({
   dragMode: DropMode | null;
   dragBlocked: boolean;
   onClick: () => void;
+  /** Clear the MIDI assignment. */
+  onClear: () => void;
   dndProps: {
     onDragOver: (e: React.DragEvent) => void;
     onDrop: (e: React.DragEvent) => void;
@@ -815,7 +996,24 @@ function MidiRow({
       </span>
       <span />
       <span />
-      <span />
+      {/* Trailing slot: × button when MIDI is selected and has an
+          assignment. MIDI can't move (slot 24 is fixed), so no
+          ↑ / ↓ buttons. */}
+      <span className="flex items-center justify-end gap-0.5">
+        {isSelected && filename !== null && (
+          <RowActionButton
+            onClick={(e) => {
+              e.stopPropagation();
+              onClear();
+            }}
+            title="Clear MIDI assignment (Delete)"
+            ariaLabel="Clear MIDI assignment"
+            danger
+          >
+            <CloseIcon className="h-3 w-3" />
+          </RowActionButton>
+        )}
+      </span>
     </button>
   );
 }

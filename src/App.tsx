@@ -29,7 +29,7 @@ export default function App() {
 }
 
 function Shell() {
-  const { state, dispatch } = useAppState();
+  const { state, dispatch, requestClearSelection } = useAppState();
 
   // ESC clears the editor's channel highlight first, then falls back to
   // clearing the sidebar selection. Skipped if focus is in an input
@@ -51,12 +51,16 @@ function Shell() {
       // SongEditor, song-row highlight in PlaylistEditor), then the
       // sidebar selection. Channel and playlist-row are mutually
       // exclusive — at most one editor is mounted at a time.
+      //
+      // The sidebar-selection clear goes through requestClearSelection
+      // so the unsaved-changes guard can intercept (the sub-selection
+      // clears are local affordances, no guard needed).
       if (state.channelSelection !== null) {
         dispatch({ type: "select_channel", channel: null });
       } else if (state.playlistRowSelection !== null) {
         dispatch({ type: "select_playlist_row", row: null });
       } else if (state.selection !== null) {
-        dispatch({ type: "clear_selection" });
+        void requestClearSelection();
       }
     };
     window.addEventListener("keydown", onKeydown);
@@ -66,6 +70,7 @@ function Shell() {
     state.channelSelection,
     state.playlistRowSelection,
     dispatch,
+    requestClearSelection,
   ]);
 
   // Show empty state until the user has chosen a folder. We also fall
