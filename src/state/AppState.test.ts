@@ -99,4 +99,29 @@ describe("AppState reducer", () => {
     expect(cleared.selection).toBeNull();
     expect(cleared.channelSelection).toBeNull();
   });
+
+  it("select_playlist_row sets and clears the row index", () => {
+    const next = reducer(initialState, {
+      type: "select_playlist_row",
+      row: 4,
+    });
+    expect(next.playlistRowSelection).toBe(4);
+    const cleared = reducer(next, {
+      type: "select_playlist_row",
+      row: null,
+    });
+    expect(cleared.playlistRowSelection).toBeNull();
+  });
+
+  it("changing sidebar selection resets the playlist row selection", () => {
+    const withRow = reducer(initialState, {
+      type: "select_playlist_row",
+      row: 2,
+    });
+    const newPlaylist = reducer(withRow, {
+      type: "select",
+      selection: { kind: "playlist", path: "/some/Set.jcp" },
+    });
+    expect(newPlaylist.playlistRowSelection).toBeNull();
+  });
 });

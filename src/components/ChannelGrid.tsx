@@ -20,8 +20,15 @@
  *     .jcs file's stored precision.
  */
 
+import { useEffect, useState } from "react";
 import { MIDI_CHANNEL_INDEX, TRACK_MAP_CHANNEL_COUNT, type Song } from "../codec";
+import type { AudioFileInfo } from "../fs/types";
 import { cn } from "../lib/cn";
+import {
+  readDragPayload,
+  setDragImageLabel,
+  setDragPayload,
+} from "../lib/dnd";
 
 interface Props {
   song: Song;
@@ -45,7 +52,45 @@ interface Props {
   selectedChannel: number | null;
   /** Toggle selection of a channel. Pass `null` to clear. */
   onSelectChannel: (channel: number | null) => void;
+  /**
+   * Called when a source file is dropped onto a channel. The validation
+   * (stereo / rate / kind / MIDI-slot match) happens in the parent so
+   * an unhappy drop is a silent no-op (matches the click-to-assign
+   * behavior — clicking a stereo file from the source pane also no-ops).
+   *
+   * `mode` controls what happens to any existing assignment at the
+   * target: replace = overwrite; shiftUp = existing moves to channel-1;
+   * shiftDown = existing moves to channel+1. The parent gracefully
+   * falls back to replace if the shift target is occupied or out of
+   * bounds.
+   */
+  onDropFile: (
+    file: AudioFileInfo,
+    channel: number,
+    mode: DropMode,
+  ) => void;
+  /**
+   * Called when an existing channel assignment is dragged to another
+   * channel. Same `mode` semantics as `onDropFile`. For empty target
+   * channels, mode is always "replace" (which is just a move).
+   */
+  onMoveChannel: (from: number, to: number, mode: DropMode) => void;
 }
+
+/**
+ * How a drop on an *occupied* channel should treat the existing file.
+ *
+ *   - `replace`:   overwrite — existing file is discarded
+ *   - `shiftUp`:   existing file moves to `channel - 1`
+ *   - `shiftDown`: existing file moves to `channel + 1`
+ *
+ * Empty targets always use `replace` (which is just an add/move).
+ */
+export type DropMode = "replace" | "shiftUp" | "shiftDown";
+
+/** Y-position thresholds (in px) for the three drop zones on an
+ *  occupied row. Outside these strips, the zone is "replace". */
+const SHIFT_EDGE_PX = 8;
 
 // Column template:
 //   Ch # | Label | (icon slot) | File | Lvl | Pan | (delete slot)
@@ -71,6 +116,8 @@ export function ChannelGrid({
   channelSampleRates,
   selectedChannel,
   onSelectChannel,
+  onDropFile,
+  onMoveChannel,
 }: Props) {
   const longestDurationLabel = formatDuration(longestDurationSeconds);
   const audioByChannel = new Map<number, Song["audioFiles"][number]>();
@@ -82,6 +129,103 @@ export function ChannelGrid({
 
   const handleToggle = (channel: number) => {
     onSelectChannel(selectedChannel === channel ? null : channel);
+  };
+
+  // Track which channel is being dragged-over and which zone (mode).
+  //
+  // Pattern: source of truth is `onDragOver`, which fires continuously
+  // while the cursor sits over a row. We update state on every
+  // dragOver (cheaply — only commits a change when channel/mode
+  // actually flip). We don't use dragEnter / dragLeave at all — those
+  // are notoriously flaky because dragLeave fires when the cursor
+  // crosses into a child element, even though the cursor is still
+  // visually inside the row. The result: the highlight tracks the
+  // cursor reliably without dropouts. (Issue raised in testing
+  // 2026-04-28: drop zones flickered.)
+  //
+  // Cleared on drop, on dragend, and on a dragover-in-empty-area
+  // safety net registered at window level.
+  const [dragOver, setDragOver] = useState<{
+    channel: number;
+    mode: DropMode;
+    /** Cached feasibility: false means the cascade has no empty
+     *  channel to land in, so the drop will be refused. */
+    blocked: boolean;
+  } | null>(null);
+
+  // Clear the highlight when ANY drag ends (drop, cancel, or out of
+  // window) so it doesn't get stuck after the cursor leaves the grid.
+  useEffect(() => {
+    const onEnd = () => setDragOver(null);
+    window.addEventListener("dragend", onEnd);
+    return () => window.removeEventListener("dragend", onEnd);
+  }, []);
+
+  /**
+   * Compute drop mode from cursor Y vs row rect.
+   *
+   *   - Empty row: always `replace` (no shift makes sense — there's
+   *     nothing to shift).
+   *   - Occupied row: top SHIFT_EDGE_PX → shiftDown; bottom SHIFT_EDGE_PX
+   *     → shiftUp; middle → replace.
+   *
+   * Direction note: dropping near the top edge pushes the existing
+   * file *away from the cursor*, so it moves DOWN to channel + 1.
+   * Dropping near the bottom edge pushes existing UP. This is the
+   * "scoot existing out of the way" mental model — the dragged file
+   * lands at the cursor position, and existing yields in the
+   * opposite direction.
+   */
+  const computeMode = (
+    e: React.DragEvent,
+    isOccupied: boolean,
+  ): DropMode => {
+    if (!isOccupied) return "replace";
+    const rect = e.currentTarget.getBoundingClientRect();
+    const y = e.clientY - rect.top;
+    if (y < SHIFT_EDGE_PX) return "shiftDown";
+    if (y > rect.height - SHIFT_EDGE_PX) return "shiftUp";
+    return "replace";
+  };
+
+  /**
+   * Feasibility check for the cascade shift: is there an empty
+   * channel in the requested direction?
+   *
+   * Mirrors `cascadeShift` in SongEditor (which is the source of
+   * truth) but only computes the boolean — no array manipulation.
+   * Used during dragOver to render a "blocked" indicator before the
+   * user drops on an impossible target.
+   */
+  const canCascadeShift = (target: number, direction: -1 | 1): boolean => {
+    const occupied = new Set(song.audioFiles.map((f) => f.channel));
+    if (direction === -1) {
+      for (let i = target - 1; i >= 0; i--) {
+        if (!occupied.has(i)) return true;
+      }
+    } else {
+      for (let i = target + 1; i < MIDI_CHANNEL_INDEX; i++) {
+        if (!occupied.has(i)) return true;
+      }
+    }
+    return false;
+  };
+
+  const handleDrop = (channel: number, e: React.DragEvent) => {
+    e.preventDefault();
+    const mode = dragOver?.channel === channel ? dragOver.mode : "replace";
+    setDragOver(null);
+    const payload = readDragPayload(e);
+    if (!payload) return;
+    if (payload.kind === "source-file") {
+      onDropFile(payload.file, channel, mode);
+    } else if (payload.kind === "channel-move") {
+      // Dropping a channel onto itself is a no-op regardless of mode.
+      if (payload.sourceChannel === channel) return;
+      onMoveChannel(payload.sourceChannel, channel, mode);
+    }
+    // Other payload kinds (playlist-row, available-song) are ignored —
+    // they belong to PlaylistEditor's drop targets.
   };
 
   return (
@@ -101,6 +245,42 @@ export function ChannelGrid({
         {Array.from({ length: TRACK_MAP_CHANNEL_COUNT }).map((_, idx) => {
           const isSelected = selectedChannel === idx;
           const isMidiSlot = idx === MIDI_CHANNEL_INDEX;
+          const isDragOver = dragOver?.channel === idx;
+          const dragMode = isDragOver ? dragOver.mode : null;
+          const dragBlocked = isDragOver ? dragOver.blocked : false;
+          const isOccupied =
+            (idx === MIDI_CHANNEL_INDEX
+              ? midi !== undefined
+              : audioByChannel.has(idx));
+          const dndProps = {
+            onDragOver: (e: React.DragEvent) => {
+              // Always preventDefault on dragOver to allow drop. We
+              // can't reliably gate on dataTransfer.types in WebKit
+              // (custom MIME types are scrubbed during dragover), so
+              // the drop handler validates payload shape and silently
+              // no-ops on mismatch.
+              e.preventDefault();
+              e.dataTransfer.dropEffect =
+                readDragPayload(e)?.kind === "channel-move"
+                  ? "move"
+                  : "copy";
+              const mode = computeMode(e, isOccupied);
+              const blocked =
+                mode === "shiftUp"
+                  ? !canCascadeShift(idx, -1)
+                  : mode === "shiftDown"
+                    ? !canCascadeShift(idx, 1)
+                    : false;
+              setDragOver((cur) =>
+                cur?.channel === idx &&
+                cur.mode === mode &&
+                cur.blocked === blocked
+                  ? cur
+                  : { channel: idx, mode, blocked },
+              );
+            },
+            onDrop: (e: React.DragEvent) => handleDrop(idx, e),
+          };
           if (isMidiSlot) {
             return (
               <MidiRow
@@ -108,7 +288,11 @@ export function ChannelGrid({
                 label={channelLabels[idx] ?? "MIDI"}
                 filename={midi?.filename ?? null}
                 isSelected={isSelected}
+                isDragOver={isDragOver}
+                dragMode={dragMode}
+                dragBlocked={dragBlocked}
                 onClick={() => handleToggle(idx)}
+                dndProps={dndProps}
               />
             );
           }
@@ -136,7 +320,11 @@ export function ChannelGrid({
               channelRate={channelRate ?? null}
               songRate={songRate}
               isSelected={isSelected}
+              isDragOver={isDragOver}
+              dragMode={dragMode}
+              dragBlocked={dragBlocked}
               onClick={() => handleToggle(idx)}
+              dndProps={dndProps}
             />
           );
         })}
@@ -162,7 +350,11 @@ function AudioRow({
   channelRate,
   songRate,
   isSelected,
+  isDragOver,
+  dragMode,
+  dragBlocked,
   onClick,
+  dndProps,
 }: {
   index: number;
   label: string;
@@ -176,7 +368,16 @@ function AudioRow({
   channelRate: number | null;
   songRate: number;
   isSelected: boolean;
+  isDragOver: boolean;
+  /** When dragging over, which zone the cursor is in. */
+  dragMode: DropMode | null;
+  /** When `dragMode` is a shift, whether the cascade has nowhere to land. */
+  dragBlocked: boolean;
   onClick: () => void;
+  dndProps: {
+    onDragOver: (e: React.DragEvent) => void;
+    onDrop: (e: React.DragEvent) => void;
+  };
 }) {
   const isAssigned = filename !== null;
   const longestTooltip = `Longest file in this song (${longestDurationLabel}) — its length sets the song's overall duration. The BandMate plays through until this file ends.`;
@@ -187,16 +388,71 @@ function AudioRow({
     <button
       type="button"
       onClick={onClick}
+      // Assigned rows can be dragged onto another channel to move
+      // the assignment (file + level/pan/mute + any pending copy).
+      draggable={isAssigned}
+      onDragStart={(e) => {
+        if (!isAssigned) return;
+        setDragPayload(e, { kind: "channel-move", sourceChannel: index });
+        // Custom drag image — just the filename, not the whole row
+        // with its #/label/lvl/pan columns. Keeps the ghost compact
+        // and on-message ("you're dragging this file").
+        setDragImageLabel(e, filename ?? "");
+      }}
+      {...dndProps}
       className={cn(
-        `grid ${COLS} w-full items-center gap-2 border-b px-3 py-1 text-left transition-colors`,
-        isSelected
-          ? "border-brand-300 bg-brand-50 dark:border-brand-700 dark:bg-brand-950/30"
-          : hasRateMismatch
-            ? "border-zinc-100 bg-red-50/40 hover:bg-red-100/40 dark:border-zinc-900 dark:bg-red-950/20 dark:hover:bg-red-950/30"
-            : "border-zinc-100 hover:bg-zinc-50 dark:border-zinc-900 dark:hover:bg-zinc-900/40",
+        // `relative` so the ::before/::after insertion-line markers
+        // and the selected-row accent bar (rendered as an absolute
+        // child below) can position against the row.
+        `relative grid ${COLS} w-full items-center gap-2 border-b px-3 py-1 text-left transition-colors`,
+        isAssigned && "cursor-grab active:cursor-grabbing",
+        // ---- Drag-zone visuals (highest priority — what the user's
+        // reacting to right now). Strong, distinct from selected. ----
+        // Replace: full ring + saturated bg.
+        isDragOver && dragMode === "replace" &&
+          "bg-brand-200 ring-2 ring-inset ring-brand-500 dark:bg-brand-900/60 dark:ring-brand-400",
+        // Shift: insertion line at the cursor edge + a faint zinc
+        // tint to keep visual focus on the line itself. The line color
+        // flips red when the cascade is blocked (no empty channel).
+        isDragOver && dragMode !== "replace" &&
+          "bg-zinc-100 dark:bg-zinc-800/60",
+        isDragOver && dragMode === "shiftDown" && !dragBlocked &&
+          "before:absolute before:inset-x-0 before:top-0 before:z-10 before:h-1 before:bg-brand-500 before:content-['']",
+        isDragOver && dragMode === "shiftUp" && !dragBlocked &&
+          "after:absolute after:inset-x-0 after:bottom-0 after:z-10 after:h-1 after:bg-brand-500 after:content-['']",
+        isDragOver && dragMode === "shiftDown" && dragBlocked &&
+          "before:absolute before:inset-x-0 before:top-0 before:z-10 before:h-1 before:bg-red-500 before:content-['']",
+        isDragOver && dragMode === "shiftUp" && dragBlocked &&
+          "after:absolute after:inset-x-0 after:bottom-0 after:z-10 after:h-1 after:bg-red-500 after:content-['']",
+        // ---- Resting / hover / selected. Distinct hue intensities so
+        // the user can tell them apart at a glance. ----
+        !isDragOver &&
+          (isSelected
+            // Selected: medium-saturated brand bg. The accent bar (rendered
+            // as an absolute child below) carries the strong "this row
+            // is selected" signal so the bg can stay subtle and not
+            // compete with the dropzone-replace bg.
+            ? "border-zinc-100 bg-brand-50 dark:border-zinc-900 dark:bg-brand-950/30"
+            : hasRateMismatch
+              ? "border-zinc-100 bg-red-50/40 hover:bg-red-100/60 dark:border-zinc-900 dark:bg-red-950/20 dark:hover:bg-red-950/40"
+              // Idle/hover: visibly grayer hover state than before
+              // (zinc-100 vs zinc-50) so it reads as a real hover
+              // signal, not just a rendering artifact.
+              : "border-zinc-100 hover:bg-zinc-100 dark:border-zinc-900 dark:hover:bg-zinc-800/60"),
       )}
       aria-pressed={isSelected}
     >
+      {/* Selected-row accent bar — 3px brand-color stripe at the
+          left edge. Distinct from any drag-state visual. */}
+      {isSelected && !isDragOver && (
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-y-0 left-0 w-[3px] bg-brand-500"
+        />
+      )}
+      {isDragOver && (
+        <DropZoneLabel mode={dragMode} blocked={dragBlocked} />
+      )}
       <span
         className={cn(
           "text-right font-mono text-xs tabular-nums",
@@ -289,6 +545,131 @@ function AudioRow({
 }
 
 /**
+ * Drop-zone label rendered inside a channel row during dragOver, to
+ * tell the user what the upcoming drop will do.
+ *
+ * Position rationale: pinned to the LEFT side of the row so it
+ * doesn't sit underneath the drag image. The browser positions the
+ * drag image at `cursor + (12, 16)` (see `setDragImageLabel`), so
+ * the lower-right of the cursor is occupied — the left edge of the
+ * row is the safe zone. The label covers the channel-# column
+ * mid-drag, but that's transient and the row's bg highlight still
+ * conveys which row is targeted.
+ *
+ *   - shiftDown (top edge): label pinned to top-left
+ *   - shiftUp (bottom edge): label pinned to bottom-left
+ *   - replace (middle): label pinned center-left
+ *
+ * `pointer-events-none` so the label doesn't disrupt drag events on
+ * the row underneath.
+ */
+function DropZoneLabel({
+  mode,
+  blocked,
+}: {
+  mode: DropMode | null;
+  blocked: boolean;
+}) {
+  if (!mode) return null;
+  if (blocked && mode !== "replace") {
+    const positionCls =
+      mode === "shiftDown" ? "top-0.5 left-2" : "bottom-0.5 left-2";
+    return (
+      <span
+        className={cn(
+          "pointer-events-none absolute z-20 inline-flex items-center gap-1 rounded bg-red-600 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white shadow",
+          positionCls,
+        )}
+      >
+        <NoEntryIcon className="h-3 w-3" />
+        No empty channel
+      </span>
+    );
+  }
+  if (mode === "replace") {
+    return (
+      <span
+        className="pointer-events-none absolute left-2 top-1/2 z-20 inline-flex -translate-y-1/2 items-center gap-1 rounded bg-brand-600 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white shadow"
+      >
+        Replace
+      </span>
+    );
+  }
+  // shiftUp / shiftDown
+  const isShiftUp = mode === "shiftUp";
+  const positionCls = isShiftUp ? "bottom-0.5 left-2" : "top-0.5 left-2";
+  const arrow = isShiftUp ? (
+    <ArrowUpIcon className="h-3 w-3" />
+  ) : (
+    <ArrowDownIcon className="h-3 w-3" />
+  );
+  const text = isShiftUp ? "Push existing up" : "Push existing down";
+  return (
+    <span
+      className={cn(
+        "pointer-events-none absolute z-20 inline-flex items-center gap-1 rounded bg-brand-600 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white shadow",
+        positionCls,
+      )}
+    >
+      {arrow}
+      {text}
+    </span>
+  );
+}
+
+function ArrowUpIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={className}
+    >
+      <path d="M8 13V3M3.5 7.5 8 3l4.5 4.5" />
+    </svg>
+  );
+}
+
+function ArrowDownIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={className}
+    >
+      <path d="M8 3v10M3.5 8.5 8 13l4.5-4.5" />
+    </svg>
+  );
+}
+
+function NoEntryIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={className}
+    >
+      <circle cx="8" cy="8" r="6" />
+      <path d="M4 8h8" />
+    </svg>
+  );
+}
+
+/**
  * Inline warning triangle (with exclamation) used for sample-rate
  * mismatch and other hard errors that need to fit in the 16px icon
  * slot. Single glyph reads as "this row has a problem" at a glance;
@@ -344,25 +725,61 @@ function MidiRow({
   label,
   filename,
   isSelected,
+  isDragOver,
+  dragMode,
+  dragBlocked,
   onClick,
+  dndProps,
 }: {
   label: string;
   filename: string | null;
   isSelected: boolean;
+  isDragOver: boolean;
+  dragMode: DropMode | null;
+  dragBlocked: boolean;
   onClick: () => void;
+  dndProps: {
+    onDragOver: (e: React.DragEvent) => void;
+    onDrop: (e: React.DragEvent) => void;
+  };
 }) {
+  // MIDI slot is fixed at index 24, so shift modes don't really apply
+  // — but we still highlight the same way (the parent caps mode at
+  // "replace" for the MIDI slot anyway, since computeMode only
+  // returns shifts for occupied non-MIDI rows in practice).
   return (
     <button
       type="button"
       onClick={onClick}
+      {...dndProps}
       className={cn(
-        `grid ${COLS} w-full items-center gap-2 border-b px-3 py-1 text-left transition-colors`,
-        isSelected
-          ? "border-brand-300 bg-brand-50 dark:border-brand-700 dark:bg-brand-950/30"
-          : "border-zinc-200 bg-green-50/40 hover:bg-green-100/40 dark:border-zinc-800 dark:bg-green-950/10 dark:hover:bg-green-900/20",
+        `relative grid ${COLS} w-full items-center gap-2 border-b px-3 py-1 text-left transition-colors`,
+        // Drag-zone visuals (matches AudioRow palette).
+        isDragOver && dragMode === "replace" &&
+          "bg-brand-200 ring-2 ring-inset ring-brand-500 dark:bg-brand-900/60 dark:ring-brand-400",
+        isDragOver && dragMode !== "replace" &&
+          "bg-zinc-100 dark:bg-zinc-800/60",
+        isDragOver && dragMode === "shiftDown" && !dragBlocked &&
+          "before:absolute before:inset-x-0 before:top-0 before:z-10 before:h-1 before:bg-brand-500 before:content-['']",
+        isDragOver && dragMode === "shiftUp" && !dragBlocked &&
+          "after:absolute after:inset-x-0 after:bottom-0 after:z-10 after:h-1 after:bg-brand-500 after:content-['']",
+        // Resting / selected.
+        !isDragOver &&
+          (isSelected
+            ? "border-zinc-200 bg-brand-50 dark:border-zinc-800 dark:bg-brand-950/30"
+            : "border-zinc-200 bg-green-50/40 hover:bg-green-100/60 dark:border-zinc-800 dark:bg-green-950/10 dark:hover:bg-green-900/30"),
       )}
       aria-pressed={isSelected}
     >
+      {isSelected && !isDragOver && (
+        <span
+          aria-hidden="true"
+          className="pointer-events-none absolute inset-y-0 left-0 w-[3px] bg-brand-500"
+        />
+      )}
+      {isDragOver && (
+        <DropZoneLabel mode={dragMode} blocked={dragBlocked} />
+      )}
       <span className="text-right font-mono text-[10px] uppercase tabular-nums text-green-700 dark:text-green-500">
         MID
       </span>

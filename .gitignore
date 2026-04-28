@@ -39,3 +39,6 @@ coverage/
 
 # Tauri-generated config caches
 src-tauri/.cargo-lock
+
+# Reverse-engineered BM Loader reference (research material; not part of the rebuild)
+decompiled/

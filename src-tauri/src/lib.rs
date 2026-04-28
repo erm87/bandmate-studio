@@ -514,6 +514,535 @@ fn file_exists(path: String) -> bool {
 }
 
 // ---------------------------------------------------------------------------
+// Phase 3f — New Song wizard
+// ---------------------------------------------------------------------------
+
+/// Result of [`create_song`] — both paths the frontend will need next:
+/// the folder it just made, and the .jcs file it should write into it.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatedSong {
+    /// Absolute path of the new song folder (`bm_sources/<name>/`).
+    pub folder_path: String,
+    /// Absolute path the frontend should `write_text_file` the .jcs to.
+    pub jcs_path: String,
+}
+
+/// Create a new song folder under `<working_folder>/bm_media/bm_sources/`.
+///
+/// The folder name *is* the song name — that's the BandMate convention
+/// (the device shows the folder name on screen, and the .jcs filename
+/// matches). This command:
+///
+///   1. Validates `song_name` (non-empty, no path separators, no leading
+///      dot, ≤ 64 chars). We're stricter than macOS file naming because
+///      this name has to round-trip through BandMate's display + the
+///      .jcp parser.
+///   2. Computes `bm_sources/<song_name>/` and `bm_sources/<song_name>/<song_name>.jcs`.
+///   3. Errors if the song folder already exists — caller handles the
+///      collision (e.g., dialog: "A song named X already exists").
+///   4. Creates the folder.
+///   5. Returns both paths so the frontend can write the empty .jcs and
+///      then route the user into the editor.
+///
+/// Note: the .jcs file itself is *not* written here. The frontend's
+/// codec library (`writeSong`) is the authority on .jcs format, so we
+/// keep file generation on the TS side and use this command only for
+/// the folder skeleton.
+#[tauri::command]
+fn create_song(working_folder: String, song_name: String) -> Result<CreatedSong, String> {
+    // 1. Name validation. Mirror these rules in the dialog's live
+    //    validator — but treat this as the source of truth.
+    let trimmed = song_name.trim();
+    if trimmed.is_empty() {
+        return Err("Song name cannot be empty.".to_string());
+    }
+    if trimmed.len() > 64 {
+        return Err("Song name is too long (max 64 characters).".to_string());
+    }
+    if trimmed.starts_with('.') {
+        return Err("Song name cannot start with a dot.".to_string());
+    }
+    if trimmed.contains('/') || trimmed.contains('\\') {
+        return Err("Song name cannot contain '/' or '\\'.".to_string());
+    }
+    if trimmed.contains('\0') {
+        return Err("Song name contains an invalid character.".to_string());
+    }
+
+    // 2. Build the target paths.
+    let working = Path::new(&working_folder);
+    if !working.is_dir() {
+        return Err(format!("Working folder is not a directory: {}", working_folder));
+    }
+    let sources_dir = working.join("bm_media").join("bm_sources");
+    let song_dir = sources_dir.join(trimmed);
+    let jcs_path = song_dir.join(format!("{}.jcs", trimmed));
+
+    // 3. Collision check. We don't overwrite — caller should prompt the
+    //    user (rename or open the existing one).
+    if song_dir.exists() {
+        return Err(format!("A song named '{}' already exists.", trimmed));
+    }
+
+    // 4. Create. `create_dir_all` is idempotent for the parents but
+    //    this leaf directory is fresh per the check above.
+    fs::create_dir_all(&song_dir)
+        .map_err(|e| format!("Cannot create song folder: {}", e))?;
+
+    Ok(CreatedSong {
+        folder_path: song_dir.to_string_lossy().to_string(),
+        jcs_path: jcs_path.to_string_lossy().to_string(),
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4 — New Playlist wizard
+// ---------------------------------------------------------------------------
+
+/// Result of [`create_playlist`] — the path the frontend should write
+/// the empty .jcp into.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CreatedPlaylist {
+    /// Absolute path the frontend should `write_text_file` the .jcp to.
+    pub jcp_path: String,
+}
+
+/// Create a new (empty) playlist file under
+/// `<working_folder>/bm_media/bm_sources/<name>.jcp`.
+///
+/// `.jcp` files live in `bm_sources/` alongside song folders — that's
+/// JoeCo's BM Loader convention (see SPEC.md). The BandMate scans
+/// `bm_sources/` directly for both `<song_folder>/<song>.jcs` and
+/// `<playlist>.jcp` files.
+///
+///   1. Validates `name` (same rules as `create_song` — non-empty, no
+///      slashes, no leading dot, ≤64 chars). The name doubles as the
+///      .jcp filename minus the extension AND becomes the
+///      <playlist_display_name> on first write.
+///   2. Errors if `<name>.jcp` already exists.
+///   3. Does NOT write the .jcp itself — caller writes via the codec.
+#[tauri::command]
+fn create_playlist(working_folder: String, name: String) -> Result<CreatedPlaylist, String> {
+    let trimmed = name.trim();
+    if trimmed.is_empty() {
+        return Err("Playlist name cannot be empty.".to_string());
+    }
+    if trimmed.len() > 64 {
+        return Err("Playlist name is too long (max 64 characters).".to_string());
+    }
+    if trimmed.starts_with('.') {
+        return Err("Playlist name cannot start with a dot.".to_string());
+    }
+    if trimmed.contains('/') || trimmed.contains('\\') {
+        return Err("Playlist name cannot contain '/' or '\\'.".to_string());
+    }
+    if trimmed.contains('\0') {
+        return Err("Playlist name contains an invalid character.".to_string());
+    }
+
+    let working = Path::new(&working_folder);
+    if !working.is_dir() {
+        return Err(format!("Working folder is not a directory: {}", working_folder));
+    }
+    let bm_sources = working.join("bm_media").join("bm_sources");
+    if !bm_sources.is_dir() {
+        // Defensive: shouldn't happen since init_working_folder ensures
+        // bm_sources/ exists, but surface a clear error if it does.
+        return Err(
+            "bm_media/bm_sources/ folder is missing — re-pick the working folder.".to_string(),
+        );
+    }
+    let jcp_path = bm_sources.join(format!("{}.jcp", trimmed));
+    if jcp_path.exists() {
+        return Err(format!("A playlist named '{}.jcp' already exists.", trimmed));
+    }
+
+    // Don't write the file here — codec on the TS side does that.
+    // We just reserved the name (collision-checked above) and return
+    // the path. There's a tiny TOCTOU window between this check and
+    // the actual write, but we accept it: the worst case is a
+    // surprise overwrite of a .jcp the user just created in another
+    // tool, which is vanishingly unlikely in our single-user setting.
+
+    Ok(CreatedPlaylist {
+        jcp_path: jcp_path.to_string_lossy().to_string(),
+    })
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4 — Delete + Duplicate operations
+// ---------------------------------------------------------------------------
+//
+// Each operation is type-specific (delete_song / delete_playlist /
+// delete_track_map, etc.) rather than a single `delete_path` so we can
+// validate locations and shapes before touching disk. The TS side
+// is responsible for any cross-reference cleanup before calling these
+// (e.g., remove a song from playlists, then call delete_song).
+
+/// Recursively delete a song's folder and contents.
+///
+/// Path validation: we require the folder to live inside
+/// `<working_folder>/bm_media/bm_sources/`, to avoid any chance of
+/// the frontend sending a path it shouldn't be touching.
+#[tauri::command]
+fn delete_song(working_folder: String, song_folder: String) -> Result<(), String> {
+    let working = Path::new(&working_folder);
+    let target = Path::new(&song_folder);
+    let expected_parent = working.join("bm_media").join("bm_sources");
+    if !target.starts_with(&expected_parent) {
+        return Err(format!(
+            "Refusing to delete: '{}' is not inside bm_sources/.",
+            song_folder
+        ));
+    }
+    if !target.is_dir() {
+        return Err(format!("Not a directory: {}", song_folder));
+    }
+    fs::remove_dir_all(target).map_err(|e| format!("Cannot delete song: {}", e))
+}
+
+/// Delete a single `.jcp` playlist file.
+///
+/// Path safety: must live under `bm_media/bm_sources/` (the canonical
+/// .jcp location per SPEC). If a stray .jcp exists elsewhere under
+/// `bm_media/` from a buggy earlier build, the user should move it
+/// manually rather than us silently deleting from any subfolder.
+#[tauri::command]
+fn delete_playlist(working_folder: String, jcp_path: String) -> Result<(), String> {
+    let working = Path::new(&working_folder);
+    let target = Path::new(&jcp_path);
+    let expected_parent = working.join("bm_media").join("bm_sources");
+    if !target.starts_with(&expected_parent) {
+        return Err(format!(
+            "Refusing to delete: '{}' is not inside bm_media/bm_sources/.",
+            jcp_path
+        ));
+    }
+    if !target.is_file() || target.extension().and_then(|s| s.to_str()) != Some("jcp") {
+        return Err(format!("Not a .jcp file: {}", jcp_path));
+    }
+    fs::remove_file(target).map_err(|e| format!("Cannot delete playlist: {}", e))
+}
+
+/// Delete a single `.jcm` track-map file.
+#[tauri::command]
+fn delete_track_map(working_folder: String, jcm_path: String) -> Result<(), String> {
+    let working = Path::new(&working_folder);
+    let target = Path::new(&jcm_path);
+    let expected_parent = working.join("bm_media").join("bm_trackmaps");
+    if !target.starts_with(&expected_parent) {
+        return Err(format!(
+            "Refusing to delete: '{}' is not inside bm_trackmaps/.",
+            jcm_path
+        ));
+    }
+    if !target.is_file() || target.extension().and_then(|s| s.to_str()) != Some("jcm") {
+        return Err(format!("Not a .jcm file: {}", jcm_path));
+    }
+    fs::remove_file(target).map_err(|e| format!("Cannot delete track map: {}", e))
+}
+
+/// Duplicate a song folder. Copies the entire folder + all WAVs + .jcs,
+/// renaming the inner `.jcs` to match the new folder name.
+///
+/// The TS-side caller is expected to derive `new_name` (typically by
+/// finding the lowest unused "Foo N" suffix) and to handle any
+/// .jcs-internal edits via a follow-up read/parse/write pass if the
+/// .jcs format ever stores the song name internally.
+#[tauri::command]
+fn duplicate_song(
+    working_folder: String,
+    source_name: String,
+    new_name: String,
+) -> Result<CreatedSong, String> {
+    let trimmed = new_name.trim();
+    if trimmed.is_empty() {
+        return Err("New song name cannot be empty.".to_string());
+    }
+    if trimmed.contains('/') || trimmed.contains('\\') {
+        return Err("Song name cannot contain '/' or '\\'.".to_string());
+    }
+    let working = Path::new(&working_folder);
+    let sources = working.join("bm_media").join("bm_sources");
+    let src_dir = sources.join(&source_name);
+    let dst_dir = sources.join(trimmed);
+    if !src_dir.is_dir() {
+        return Err(format!("Source song '{}' not found.", source_name));
+    }
+    if dst_dir.exists() {
+        return Err(format!("A song named '{}' already exists.", trimmed));
+    }
+    copy_dir_recursive(&src_dir, &dst_dir)
+        .map_err(|e| format!("Cannot duplicate song: {}", e))?;
+    // Rename the inner .jcs (named after the source) to match the new
+    // folder name. We do this on a best-effort basis: if the source
+    // folder doesn't follow the convention, just leave the .jcs alone.
+    let old_jcs = dst_dir.join(format!("{}.jcs", source_name));
+    let new_jcs = dst_dir.join(format!("{}.jcs", trimmed));
+    if old_jcs.is_file() {
+        fs::rename(&old_jcs, &new_jcs)
+            .map_err(|e| format!("Cannot rename inner .jcs: {}", e))?;
+    }
+    Ok(CreatedSong {
+        folder_path: dst_dir.to_string_lossy().to_string(),
+        jcs_path: new_jcs.to_string_lossy().to_string(),
+    })
+}
+
+/// Duplicate a `.jcp` to a new filename in the same folder. Caller
+/// supplies the new filename (without `.jcp` — we add it).
+#[tauri::command]
+fn duplicate_playlist(
+    working_folder: String,
+    source_path: String,
+    new_name: String,
+) -> Result<CreatedPlaylist, String> {
+    let trimmed = new_name.trim();
+    if trimmed.is_empty() {
+        return Err("New playlist name cannot be empty.".to_string());
+    }
+    if trimmed.contains('/') || trimmed.contains('\\') {
+        return Err("Playlist name cannot contain '/' or '\\'.".to_string());
+    }
+    let working = Path::new(&working_folder);
+    let src = Path::new(&source_path);
+    if !src.is_file() {
+        return Err(format!("Source playlist not found: {}", source_path));
+    }
+    let dst = working
+        .join("bm_media")
+        .join("bm_sources")
+        .join(format!("{}.jcp", trimmed));
+    if dst.exists() {
+        return Err(format!("A playlist named '{}.jcp' already exists.", trimmed));
+    }
+    fs::copy(src, &dst).map_err(|e| format!("Cannot duplicate playlist: {}", e))?;
+    Ok(CreatedPlaylist {
+        jcp_path: dst.to_string_lossy().to_string(),
+    })
+}
+
+/// Duplicate a `.jcm` track map to a new filename.
+#[tauri::command]
+fn duplicate_track_map(
+    working_folder: String,
+    source_path: String,
+    new_name: String,
+) -> Result<String, String> {
+    let trimmed = new_name.trim();
+    if trimmed.is_empty() {
+        return Err("New track-map name cannot be empty.".to_string());
+    }
+    if trimmed.contains('/') || trimmed.contains('\\') {
+        return Err("Track-map name cannot contain '/' or '\\'.".to_string());
+    }
+    let working = Path::new(&working_folder);
+    let src = Path::new(&source_path);
+    if !src.is_file() {
+        return Err(format!("Source track map not found: {}", source_path));
+    }
+    let dst = working
+        .join("bm_media")
+        .join("bm_trackmaps")
+        .join(format!("{}.jcm", trimmed));
+    if dst.exists() {
+        return Err(format!("A track map named '{}.jcm' already exists.", trimmed));
+    }
+    fs::copy(src, &dst).map_err(|e| format!("Cannot duplicate track map: {}", e))?;
+    Ok(dst.to_string_lossy().to_string())
+}
+
+// ---------------------------------------------------------------------------
+// Phase 4 — Rename operations
+// ---------------------------------------------------------------------------
+//
+// Each rename command is responsible only for moving the file/folder
+// on disk. Cross-reference updates (rewriting `<song_name>` /
+// `<trackmap>` entries in `.jcp` files) happen on the TS side BEFORE
+// these commands are called, so the codec stays the single source of
+// truth on file format.
+
+/// Rename a song's folder + its inner `.jcs` to match the new name.
+/// Returns the new folder + .jcs paths.
+#[tauri::command]
+fn rename_song(
+    working_folder: String,
+    old_name: String,
+    new_name: String,
+) -> Result<CreatedSong, String> {
+    let trimmed = new_name.trim();
+    if trimmed.is_empty() {
+        return Err("Song name cannot be empty.".to_string());
+    }
+    if trimmed.len() > 64 {
+        return Err("Song name is too long (max 64 characters).".to_string());
+    }
+    if trimmed.starts_with('.') {
+        return Err("Song name cannot start with a dot.".to_string());
+    }
+    if trimmed.contains('/') || trimmed.contains('\\') {
+        return Err("Song name cannot contain '/' or '\\'.".to_string());
+    }
+    if trimmed == old_name.trim() {
+        return Err("New name is the same as the current name.".to_string());
+    }
+
+    let working = Path::new(&working_folder);
+    let sources = working.join("bm_media").join("bm_sources");
+    let old_dir = sources.join(&old_name);
+    let new_dir = sources.join(trimmed);
+    if !old_dir.is_dir() {
+        return Err(format!("Source song '{}' not found.", old_name));
+    }
+    if new_dir.exists() {
+        return Err(format!("A song named '{}' already exists.", trimmed));
+    }
+
+    // Rename the folder.
+    fs::rename(&old_dir, &new_dir)
+        .map_err(|e| format!("Cannot rename song folder: {}", e))?;
+
+    // Rename the inner .jcs to match. Best-effort: if there's no
+    // <old_name>.jcs (e.g. the song folder didn't follow the
+    // convention), just leave whatever's there alone.
+    let old_jcs = new_dir.join(format!("{}.jcs", old_name));
+    let new_jcs = new_dir.join(format!("{}.jcs", trimmed));
+    if old_jcs.is_file() {
+        fs::rename(&old_jcs, &new_jcs)
+            .map_err(|e| format!("Cannot rename inner .jcs: {}", e))?;
+    }
+
+    Ok(CreatedSong {
+        folder_path: new_dir.to_string_lossy().to_string(),
+        jcs_path: new_jcs.to_string_lossy().to_string(),
+    })
+}
+
+/// Rename a `.jcp` playlist file. The TS side is responsible for
+/// updating the `<playlist_display_name>` inside the file before
+/// calling this (write-old-then-rename pattern).
+#[tauri::command]
+fn rename_playlist(
+    working_folder: String,
+    old_path: String,
+    new_name: String,
+) -> Result<CreatedPlaylist, String> {
+    let trimmed = new_name.trim();
+    if trimmed.is_empty() {
+        return Err("Playlist name cannot be empty.".to_string());
+    }
+    if trimmed.contains('/') || trimmed.contains('\\') {
+        return Err("Playlist name cannot contain '/' or '\\'.".to_string());
+    }
+    let working = Path::new(&working_folder);
+    let src = Path::new(&old_path);
+    if !src.is_file() {
+        return Err(format!("Source playlist not found: {}", old_path));
+    }
+    let dst = working
+        .join("bm_media")
+        .join("bm_sources")
+        .join(format!("{}.jcp", trimmed));
+    if dst == src {
+        return Err("New name is the same as the current name.".to_string());
+    }
+    if dst.exists() {
+        return Err(format!("A playlist named '{}.jcp' already exists.", trimmed));
+    }
+    fs::rename(src, &dst).map_err(|e| format!("Cannot rename playlist: {}", e))?;
+    Ok(CreatedPlaylist {
+        jcp_path: dst.to_string_lossy().to_string(),
+    })
+}
+
+/// Rename a `.jcm` track-map file. Returns the new path.
+#[tauri::command]
+fn rename_track_map(
+    working_folder: String,
+    old_path: String,
+    new_name: String,
+) -> Result<String, String> {
+    let trimmed = new_name.trim();
+    if trimmed.is_empty() {
+        return Err("Track-map name cannot be empty.".to_string());
+    }
+    if trimmed.contains('/') || trimmed.contains('\\') {
+        return Err("Track-map name cannot contain '/' or '\\'.".to_string());
+    }
+    let working = Path::new(&working_folder);
+    let src = Path::new(&old_path);
+    if !src.is_file() {
+        return Err(format!("Source track map not found: {}", old_path));
+    }
+    let dst = working
+        .join("bm_media")
+        .join("bm_trackmaps")
+        .join(format!("{}.jcm", trimmed));
+    if dst == src {
+        return Err("New name is the same as the current name.".to_string());
+    }
+    if dst.exists() {
+        return Err(format!("A track map named '{}.jcm' already exists.", trimmed));
+    }
+    fs::rename(src, &dst).map_err(|e| format!("Cannot rename track map: {}", e))?;
+    Ok(dst.to_string_lossy().to_string())
+}
+
+/// Recursive copy helper for `duplicate_song`. Std lib doesn't ship
+/// one; this is a small DFS that copies directory entries.
+fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
+    fs::create_dir_all(dst)?;
+    for entry in fs::read_dir(src)? {
+        let entry = entry?;
+        let kind = entry.file_type()?;
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        if kind.is_dir() {
+            copy_dir_recursive(&from, &to)?;
+        } else if kind.is_file() {
+            fs::copy(&from, &to)?;
+        }
+        // Symlinks etc. are silently ignored — none expected in
+        // bm_sources/.
+    }
+    Ok(())
+}
+
+/// Read the per-song sidecar metadata file (`.bandmate-studio.json`) that
+/// stores BandMate Studio-only state — currently just the external source
+/// folder. Returns `None` if the sidecar is missing (the common case for
+/// existing songs that predate the wizard).
+///
+/// Keeping this in a sidecar file (not app prefs) means the metadata
+/// travels with the song folder when the user moves their working folder,
+/// and the dotfile prefix means the BandMate hardware ignores it.
+#[tauri::command]
+fn read_song_sidecar(song_folder: String) -> Result<Option<String>, String> {
+    let path = Path::new(&song_folder).join(".bandmate-studio.json");
+    if !path.is_file() {
+        return Ok(None);
+    }
+    fs::read_to_string(&path)
+        .map(Some)
+        .map_err(|e| format!("Cannot read sidecar: {}", e))
+}
+
+/// Write the per-song sidecar metadata file. Caller passes the JSON
+/// content as a string — we let the TS side own the schema so adding
+/// fields doesn't require Rust changes.
+#[tauri::command]
+fn write_song_sidecar(song_folder: String, content: String) -> Result<(), String> {
+    let dir = Path::new(&song_folder);
+    if !dir.is_dir() {
+        return Err(format!("Song folder is not a directory: {}", song_folder));
+    }
+    let path = dir.join(".bandmate-studio.json");
+    fs::write(&path, content).map_err(|e| format!("Cannot write sidecar: {}", e))
+}
+
+// ---------------------------------------------------------------------------
 // Tauri runtime entry
 // ---------------------------------------------------------------------------
 
@@ -533,6 +1062,19 @@ pub fn run() {
             list_audio_files,
             copy_into_folder,
             file_exists,
+            create_song,
+            read_song_sidecar,
+            write_song_sidecar,
+            create_playlist,
+            delete_song,
+            delete_playlist,
+            delete_track_map,
+            duplicate_song,
+            duplicate_playlist,
+            duplicate_track_map,
+            rename_song,
+            rename_playlist,
+            rename_track_map,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
