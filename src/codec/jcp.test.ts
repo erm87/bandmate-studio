@@ -62,6 +62,59 @@ describe("writePlaylist", () => {
   });
 });
 
+describe("<trackmap> parity with BM Loader", () => {
+  // BM Loader's loadPlaylist wraps `tree.find('./trackmap').text` in
+  // try/except and treats a missing element as no trackmap. Our reader
+  // must do the same so we can load BM Loader-written playlists that
+  // were saved without one.
+  it("parses a playlist with no <trackmap> element", () => {
+    const text = `<playlist>
+    <playlist_display_name>NoTM</playlist_display_name>
+    <srate>48000</srate>
+    <song_name>Only Song</song_name>
+</playlist>
+`;
+    const p = parsePlaylist(text);
+    expect(p.trackMap).toBe("");
+    expect(p.displayName).toBe("NoTM");
+    expect(p.songNames).toEqual(["Only Song"]);
+  });
+
+  // BM Loader's savePlaylist guards the element with `if trackmap != ''`,
+  // so we omit the element when empty for byte-for-byte parity.
+  it("omits <trackmap> when empty", () => {
+    const out = writePlaylist({
+      displayName: "NoTM",
+      sampleRate: 48000,
+      trackMap: "",
+      songNames: ["A"],
+    });
+    expect(out).not.toContain("<trackmap>");
+    expect(out).toContain("<song_name>A</song_name>");
+  });
+
+  it("emits <trackmap> when non-empty", () => {
+    const out = writePlaylist({
+      displayName: "WithTM",
+      sampleRate: 48000,
+      trackMap: "x.jcm",
+      songNames: ["A"],
+    });
+    expect(out).toContain("    <trackmap>x.jcm</trackmap>\n");
+  });
+
+  it("round-trips a no-trackmap playlist", () => {
+    const original = parsePlaylist(`<playlist>
+    <playlist_display_name>NoTM</playlist_display_name>
+    <srate>48000</srate>
+    <song_name>A</song_name>
+</playlist>
+`);
+    const reparsed = parsePlaylist(writePlaylist(original));
+    expect(reparsed).toEqual(original);
+  });
+});
+
 describe("structural round-trip", () => {
   it("May v3.jcp round-trips structurally", () => {
     const original = parsePlaylist(fx("May v3.jcp"));
