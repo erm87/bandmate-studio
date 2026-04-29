@@ -4,7 +4,15 @@ export default {
   darkMode: "media", // follow macOS system appearance
   theme: {
     extend: {
-      // Brigades brand-ish accent (placeholder — adjust later)
+      // Brigades brand-ish accent (placeholder — v0.2 craft pass will
+      // replace with the JoeCo neon palette).
+      //
+      // Note: 950 is REQUIRED. We use `dark:bg-brand-950/30` and
+      // similar arbitrary-opacity dark-mode tints in many places. If
+      // 950 is missing, those classes silently generate no CSS and
+      // the `bg-brand-50` (light) variant from the same expression
+      // wins — which is why selected rows + dropzones rendered with
+      // a near-white bg in dark mode.
       colors: {
         brand: {
           50: "#f0f7ff",
@@ -17,6 +25,7 @@ export default {
           700: "#0c4a91",
           800: "#0d3f78",
           900: "#0e3463",
+          950: "#08203e",
         },
       },
       fontFamily: {
