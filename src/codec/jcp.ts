@@ -6,10 +6,20 @@
  *   <playlist>
  *     <playlist_display_name>...</playlist_display_name>
  *     <srate>...</srate>
- *     <trackmap>...</trackmap>
+ *     <trackmap>...</trackmap>          (optional — omitted when empty)
  *     <song_name>...</song_name>
  *     ... more <song_name>'s ...
  *   </playlist>
+ *
+ * `<trackmap>` parity with BM Loader (audited 2026-04-28 against the
+ * decompiled `savePlaylist` / `loadPlaylist` in playlistparse.pyc):
+ *   - BM Loader's writer emits the element only when the trackmap
+ *     filename is non-empty (`if trackmap != '': ...`).
+ *   - BM Loader's reader wraps the find in try/except and treats a
+ *     missing element as `trackMapExists = False`.
+ * Our codec mirrors this: `parsePlaylist` accepts a missing or empty
+ * `<trackmap>` and returns `trackMap: ""`; `writePlaylist` omits the
+ * element when `trackMap` is empty.
  *
  * See SPEC.md for full format reference.
  */
@@ -40,7 +50,10 @@ export function parsePlaylist(text: string): Playlist {
     "<playlist_display_name>",
   );
   const sampleRate = parseIntStrict(root.srate, "<srate>");
-  const trackMap = requireString(root.trackmap, "<trackmap>");
+  // `<trackmap>` is optional in BM Loader's format — see file header.
+  // Missing element → "", empty element → "". The PlaylistEditor surfaces
+  // a validation warning when trackMap is "".
+  const trackMap = optionalString(root.trackmap);
   const rawNames = (root.song_name ?? []) as unknown[];
   const songNames = rawNames.map((n, idx) => {
     if (typeof n !== "string") {
@@ -67,7 +80,10 @@ export function writePlaylist(p: Playlist): string {
     `    <playlist_display_name>${escapeXml(p.displayName)}</playlist_display_name>`,
   );
   lines.push(`    <srate>${p.sampleRate}</srate>`);
-  lines.push(`    <trackmap>${escapeXml(p.trackMap)}</trackmap>`);
+  // BM Loader omits <trackmap> when empty — match it.
+  if (p.trackMap !== "") {
+    lines.push(`    <trackmap>${escapeXml(p.trackMap)}</trackmap>`);
+  }
   for (const name of p.songNames) {
     lines.push(`    <song_name>${escapeXml(name)}</song_name>`);
   }
@@ -94,6 +110,17 @@ function requireString(value: unknown, field: string): string {
   if (typeof value !== "string" || value === "") {
     throw new Error(`Missing required string field ${field}`);
   }
+  return value;
+}
+
+/**
+ * For elements that BM Loader treats as optional (e.g. `<trackmap>`).
+ * Missing → "". Empty element parses as "" too. Non-string parsed
+ * shape (shouldn't happen given XMLParser config, but defend) → "".
+ */
+function optionalString(value: unknown): string {
+  if (value === undefined || value === null) return "";
+  if (typeof value !== "string") return "";
   return value;
 }
 
