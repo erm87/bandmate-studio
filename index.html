@@ -4,6 +4,32 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>BandMate Studio</title>
+    <script>
+      // Apply color mode synchronously, before React mounts, so the
+      // user never sees a flash of the wrong theme. Mirrors the logic
+      // in AppState's colorMode effect: read userPrefs from
+      // localStorage; if mode is "auto" or absent, fall back to
+      // prefers-color-scheme. Failures are swallowed — worst case the
+      // Light variant renders and the React effect corrects it on the
+      // next tick.
+      (function () {
+        try {
+          var raw = localStorage.getItem("bandmate-studio.userPrefs");
+          var mode = "auto";
+          if (raw) {
+            var parsed = JSON.parse(raw);
+            if (parsed && typeof parsed.colorMode === "string") {
+              mode = parsed.colorMode;
+            }
+          }
+          var dark =
+            mode === "dark" ||
+            (mode === "auto" &&
+              window.matchMedia("(prefers-color-scheme: dark)").matches);
+          if (dark) document.documentElement.classList.add("dark");
+        } catch (_) {}
+      })();
+    </script>
   </head>
   <body class="bg-white text-zinc-900 dark:bg-zinc-950 dark:text-zinc-100 antialiased">
     <div id="root"></div>

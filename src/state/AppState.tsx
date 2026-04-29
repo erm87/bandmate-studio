@@ -25,7 +25,14 @@ import { ask } from "@tauri-apps/plugin-dialog";
 
 import { initAndScan, pickFolder } from "../fs/workingFolder";
 import type { ScanResult } from "../fs/types";
-import { loadWorkingFolder, saveWorkingFolder } from "./persistence";
+import {
+  DEFAULT_USER_PREFS,
+  loadUserPrefs,
+  loadWorkingFolder,
+  saveUserPrefs,
+  saveWorkingFolder,
+  type UserPrefs,
+} from "./persistence";
 
 // ---------------------------------------------------------------------------
 // Shape
@@ -48,6 +55,8 @@ export interface AppState {
   scan: ScanResult;
   status: AppStatus;
   error: string | null;
+  /** Sticky user preferences from the Settings page. Persisted to localStorage. */
+  userPrefs: UserPrefs;
   /** What the user has highlighted in the sidebar (if anything). */
   selection: Selection | null;
   /**
@@ -76,6 +85,7 @@ const INITIAL_STATE: AppState = {
   scan: EMPTY_SCAN,
   status: "idle",
   error: null,
+  userPrefs: { ...DEFAULT_USER_PREFS },
   selection: null,
   channelSelection: null,
   playlistRowSelection: null,
@@ -90,6 +100,7 @@ export type AppAction =
   | { type: "scan_succeeded"; result: ScanResult }
   | { type: "scan_failed"; error: string }
   | { type: "clear_working_folder" }
+  | { type: "set_user_prefs"; prefs: UserPrefs }
   | { type: "select"; selection: Selection }
   | { type: "clear_selection" }
   | { type: "select_channel"; channel: number | null }
@@ -143,7 +154,11 @@ function reducer(state: AppState, action: AppAction): AppState {
         error: action.error,
       };
     case "clear_working_folder":
-      return { ...INITIAL_STATE };
+      // Preserve userPrefs when forgetting the working folder — these
+      // are user-level preferences, not project-scoped state.
+      return { ...INITIAL_STATE, userPrefs: state.userPrefs };
+    case "set_user_prefs":
+      return { ...state, userPrefs: action.prefs };
     case "select":
       // Reset both editor sub-selections when sidebar selection
       // changes — the new editor opens fresh, no carryover highlight.
@@ -203,6 +218,12 @@ interface AppContextValue {
   /** Forget the current working folder (returns to first-run empty state). */
   clearWorkingFolder: () => void;
   /**
+   * Update sticky user preferences. Pass any subset of fields to merge
+   * into the current prefs; the rest stay unchanged. Persists to
+   * localStorage immediately and updates the in-memory state.
+   */
+  setUserPrefs: (partial: Partial<UserPrefs>) => void;
+  /**
    * Editors call this from a useEffect to advertise their dirty
    * state. Returns an unregister function. Only the most recently
    * registered editor's state is consulted.
@@ -227,7 +248,46 @@ const AppContext = createContext<AppContextValue | null>(null);
 // ---------------------------------------------------------------------------
 
 export function AppStateProvider({ children }: { children: ReactNode }) {
-  const [state, dispatch] = useReducer(reducer, INITIAL_STATE);
+  const [state, dispatch] = useReducer(reducer, INITIAL_STATE, (s) => ({
+    ...s,
+    userPrefs: loadUserPrefs(),
+  }));
+
+  // Apply colorMode to the document root. For "auto" we listen on the
+  // OS-level prefers-color-scheme media query so the theme follows the
+  // OS live (e.g., user toggles macOS Appearance from Light to Dark in
+  // System Settings — the app picks it up immediately).
+  useEffect(() => {
+    const root = document.documentElement;
+    const mode = state.userPrefs.colorMode;
+    if (mode === "light") {
+      root.classList.remove("dark");
+      return;
+    }
+    if (mode === "dark") {
+      root.classList.add("dark");
+      return;
+    }
+    // mode === "auto"
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const apply = (matches: boolean) => {
+      if (matches) root.classList.add("dark");
+      else root.classList.remove("dark");
+    };
+    apply(mq.matches);
+    const onChange = (e: MediaQueryListEvent) => apply(e.matches);
+    mq.addEventListener("change", onChange);
+    return () => mq.removeEventListener("change", onChange);
+  }, [state.userPrefs.colorMode]);
+
+  const setUserPrefs = useCallback(
+    (partial: Partial<UserPrefs>) => {
+      const next = { ...state.userPrefs, ...partial };
+      saveUserPrefs(next);
+      dispatch({ type: "set_user_prefs", prefs: next });
+    },
+    [state.userPrefs],
+  );
 
   // Helper: scan a path and dispatch the appropriate actions. Used by
   // both the initial restore-on-launch and the user-initiated chooser.
@@ -341,6 +401,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       chooseWorkingFolder,
       rescan,
       clearWorkingFolder,
+      setUserPrefs,
       registerDirtyEditor,
       requestSelect,
       requestClearSelection,
@@ -350,6 +411,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       chooseWorkingFolder,
       rescan,
       clearWorkingFolder,
+      setUserPrefs,
       registerDirtyEditor,
       requestSelect,
       requestClearSelection,

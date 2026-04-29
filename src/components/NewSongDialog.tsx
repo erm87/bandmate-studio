@@ -59,8 +59,10 @@ function validateName(
 export function NewSongDialog({ isOpen, onClose }: Props) {
   const { state, dispatch, rescan } = useAppState();
 
+  const defaultRate = state.userPrefs.defaultSampleRate;
+
   const [name, setName] = useState("");
-  const [sampleRate, setSampleRate] = useState<44100 | 48000>(44100);
+  const [sampleRate, setSampleRate] = useState<44100 | 48000>(defaultRate);
   const [sourceFolder, setSourceFolder] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
@@ -69,11 +71,13 @@ export function NewSongDialog({ isOpen, onClose }: Props) {
 
   // Reset form whenever the dialog opens. Done via key prop on the
   // dialog body or here — we do it here so the reset is observable
-  // for any side effects (e.g., autofocus).
+  // for any side effects (e.g., autofocus). The sample-rate seed
+  // pulls from userPrefs so changing the Settings default takes
+  // effect on the next open.
   useEffect(() => {
     if (isOpen) {
       setName("");
-      setSampleRate(44100);
+      setSampleRate(defaultRate);
       setSourceFolder(null);
       setCreating(false);
       setCreateError(null);
@@ -81,7 +85,7 @@ export function NewSongDialog({ isOpen, onClose }: Props) {
       // input exists in the DOM by the time we ask for focus.
       requestAnimationFrame(() => inputRef.current?.focus());
     }
-  }, [isOpen]);
+  }, [isOpen, defaultRate]);
 
   // ESC closes the dialog (unless we're mid-create — don't surprise
   // the user by aborting an in-flight FS write).

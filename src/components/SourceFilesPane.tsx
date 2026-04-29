@@ -580,7 +580,17 @@ function SourceFileRow({
             {subtitle}
           </p>
         </div>
-        {severity === "midi" && <Tag tone="green">MIDI</Tag>}
+        {severity === "midi" && (
+          <>
+            <Tag tone="green">MIDI</Tag>
+            {/* Cleanliness pill — informational only for source-folder
+                files (we never modify originals; the user can flip on
+                "Auto-clean imported MIDI files" in Settings to clean
+                copies on import). */}
+            {file.isMidiClean === true && <Tag tone="green">Clean</Tag>}
+            {file.isMidiClean === false && <Tag tone="amber">Not clean</Tag>}
+          </>
+        )}
         {severity === "warning" && <Tag tone="amber">Warning</Tag>}
         {severity === "error" && (
           <Tag tone="red">

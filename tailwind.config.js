@@ -1,7 +1,16 @@
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ["./index.html", "./src/**/*.{ts,tsx}"],
-  darkMode: "media", // follow macOS system appearance
+  // Class strategy — the color mode is driven by the `dark` class on
+  // <html>, which AppState's colorMode effect manages. With "media",
+  // Tailwind would gate every dark: variant on prefers-color-scheme
+  // alone and ignore the class toggle, so the Settings page Light/
+  // Dark/Auto picker would have no effect.
+  //
+  // Auto mode is still honored: the colorMode effect subscribes to
+  // matchMedia("(prefers-color-scheme: dark)") and toggles the class
+  // accordingly when the user chooses Auto.
+  darkMode: "class",
   theme: {
     extend: {
       // Brigades brand-ish accent (placeholder — v0.2 craft pass will

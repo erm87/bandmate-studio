@@ -90,6 +90,32 @@ export async function copyIntoFolder(
   return invoke<string>("copy_into_folder", { src, destDir });
 }
 
+/** Outcome of a MIDI clean operation. Mirrors the Rust `CleanResult`. */
+export interface MidiCleanResult {
+  /** True if the file was rewritten. False = file was already clean. */
+  wasModified: boolean;
+  /** Number of events stripped across all tracks. */
+  eventsRemoved: number;
+}
+
+/**
+ * Strip non-essential meta events from a MIDI file in place. Atomic
+ * (temp file + rename); see Rust `midi.rs` for the keep/strip rules.
+ * No-op on already-clean files.
+ */
+export async function cleanMidiFile(path: string): Promise<MidiCleanResult> {
+  return invoke<MidiCleanResult>("clean_midi_file", { path });
+}
+
+/**
+ * One-off "is this MIDI clean?" probe. The same result is included
+ * in `listAudioFiles`'s output as `isMidiClean` — use this only for
+ * post-clean re-checks or other one-off needs.
+ */
+export async function isMidiClean(path: string): Promise<boolean> {
+  return invoke<boolean>("is_midi_clean", { path });
+}
+
 /** True if a file exists at the given path. */
 export async function fileExists(path: string): Promise<boolean> {
   return invoke<boolean>("file_exists", { path });
