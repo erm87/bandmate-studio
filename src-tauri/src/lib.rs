@@ -30,6 +30,8 @@ use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use tauri::Emitter;
 
+mod midi;
+
 // ---------------------------------------------------------------------------
 // WAV probe (Phase 1)
 // ---------------------------------------------------------------------------
@@ -259,6 +261,12 @@ pub struct AudioFileInfo {
     pub wav_info: Option<WavInfo>,
     /// Severity-classified diagnostic. `None` = clean file.
     pub diagnostic: Option<Diagnostic>,
+    /// Cleanliness for MIDI files (kind == "mid"). `Some(true)` =
+    /// contains only keep-list events. `Some(false)` = contains
+    /// strip-list meta events that would be sent to the device on a
+    /// live MIDI port (markers, key sigs, etc — see midi.rs). `None`
+    /// for non-MIDI files or for MIDI files we couldn't parse.
+    pub is_midi_clean: Option<bool>,
 }
 
 /// File-level diagnostic. We surface these in the source-files pane.
@@ -322,12 +330,22 @@ fn list_audio_files(folder: String) -> Result<Vec<AudioFileInfo>, String> {
             (None, None)
         };
 
+        // is_midi_clean is computed for .mid files. Parse failures
+        // → None so the badge falls through to "unknown" (no badge)
+        // rather than misleadingly claiming "Not clean".
+        let is_midi_clean = if kind == "mid" {
+            midi::is_clean(&path).ok()
+        } else {
+            None
+        };
+
         out.push(AudioFileInfo {
             filename,
             path: path_str,
             kind: kind.to_string(),
             wav_info,
             diagnostic,
+            is_midi_clean,
         });
     }
 
@@ -1396,6 +1414,29 @@ fn eject_volume(path: String) -> Result<bool, String> {
 }
 
 // ---------------------------------------------------------------------------
+// MIDI cleaning (Phase 7)
+// ---------------------------------------------------------------------------
+
+/// Rewrite a MIDI file in place, removing non-essential meta events
+/// that would otherwise reach the device on a live MIDI port. Atomic:
+/// the cleaned bytes go to a temp file, get re-parsed for sanity, then
+/// rename over the original. See midi.rs for the keep/strip rules.
+///
+/// No-op if the file is already clean (returns `was_modified: false`).
+#[tauri::command]
+fn clean_midi_file(path: String) -> Result<midi::CleanResult, String> {
+    midi::clean(Path::new(&path))
+}
+
+/// Probe a single MIDI file for cleanliness. Used for one-off checks
+/// outside the `list_audio_files` flow (e.g., re-checking after a
+/// manual clean from the UI). Parse failures surface as `Err`.
+#[tauri::command]
+fn is_midi_clean(path: String) -> Result<bool, String> {
+    midi::is_clean(Path::new(&path))
+}
+
+// ---------------------------------------------------------------------------
 // Tauri runtime entry
 // ---------------------------------------------------------------------------
 
@@ -1432,6 +1473,8 @@ pub fn run() {
             rename_song,
             rename_playlist,
             rename_track_map,
+            clean_midi_file,
+            is_midi_clean,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

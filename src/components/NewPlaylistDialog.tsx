@@ -59,8 +59,10 @@ function validateName(
 export function NewPlaylistDialog({ isOpen, onClose }: Props) {
   const { state, dispatch, rescan } = useAppState();
 
+  const defaultRate = state.userPrefs.defaultSampleRate;
+
   const [name, setName] = useState("");
-  const [sampleRate, setSampleRate] = useState<44100 | 48000>(44100);
+  const [sampleRate, setSampleRate] = useState<44100 | 48000>(defaultRate);
   const [trackMapPath, setTrackMapPath] = useState<string>("");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<string | null>(null);
@@ -69,17 +71,19 @@ export function NewPlaylistDialog({ isOpen, onClose }: Props) {
 
   // Reset form whenever the dialog opens. The default track map is
   // the first available one — for most users with one .jcm in the
-  // working folder, this is the right pre-selection.
+  // working folder, this is the right pre-selection. Sample rate
+  // pulls from userPrefs so changing the Settings default takes
+  // effect on the next open.
   useEffect(() => {
     if (isOpen) {
       setName("");
-      setSampleRate(44100);
+      setSampleRate(defaultRate);
       setTrackMapPath(state.scan.trackMaps[0]?.filename ?? "");
       setCreating(false);
       setCreateError(null);
       requestAnimationFrame(() => inputRef.current?.focus());
     }
-  }, [isOpen, state.scan.trackMaps]);
+  }, [isOpen, state.scan.trackMaps, defaultRate]);
 
   // ESC closes (unless we're mid-create).
   useEffect(() => {

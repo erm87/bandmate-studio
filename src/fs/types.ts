@@ -64,6 +64,17 @@ export interface AudioFileInfo {
   wavInfo: import("../codec/types").WavInfo | null;
   /** Severity-classified probe result. */
   diagnostic: Diagnostic | null;
+  /**
+   * Cleanliness for MIDI files (kind === "mid"):
+   *   - true:  contains only keep-list events (PC, CC, notes, set_tempo,
+   *            end_of_track, sysex). Safe to send to the BandMate.
+   *   - false: contains strip-list meta events (markers, key sigs,
+   *            track names, etc.) that would be transmitted on a live
+   *            MIDI port and may cause spurious patch changes.
+   *   - null:  not a MIDI file, or a MIDI file we couldn't parse.
+   * Re-computed on every `list_audio_files` call — no persistence.
+   */
+  isMidiClean: boolean | null;
 }
 
 export type Diagnostic =

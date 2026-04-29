@@ -26,7 +26,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { message } from "@tauri-apps/plugin-dialog";
+import { ask, message } from "@tauri-apps/plugin-dialog";
 import {
   parseSong,
   parseTrackMap,
@@ -38,6 +38,7 @@ import {
 } from "../codec";
 import { TRACK_MAP_CHANNEL_COUNT, MIDI_CHANNEL_INDEX } from "../codec";
 import {
+  cleanMidiFile,
   copyIntoFolder,
   duplicateSong,
   listAudioFiles,
@@ -185,6 +186,29 @@ function shiftDirection(mode: "replace" | "shiftUp" | "shiftDown"): -1 | 1 | nul
 }
 
 /** User-facing alert text when a cascade has no empty slot to land in. */
+/**
+ * If `cleanMidiOnImport` is true and `path` ends with a MIDI extension,
+ * run the cleaner on it. Failures are swallowed (logged) — we don't
+ * want a botched clean to abort an otherwise-successful save.
+ *
+ * Hook is invoked after each `copyIntoFolder` in the save flow so the
+ * working-folder copy is the cleaned one; the source file is never
+ * touched.
+ */
+async function maybeAutoCleanMidi(
+  destPath: string,
+  cleanMidiOnImport: boolean,
+): Promise<void> {
+  if (!cleanMidiOnImport) return;
+  const lower = destPath.toLowerCase();
+  if (!lower.endsWith(".mid") && !lower.endsWith(".midi")) return;
+  try {
+    await cleanMidiFile(destPath);
+  } catch (e) {
+    console.error(`Auto-clean failed for ${destPath}:`, e);
+  }
+}
+
 const NO_EMPTY_CHANNEL_MESSAGE =
   "No empty channels available in that direction.\n\n" +
   "Drop the file directly on the channel row to replace the existing one, " +
@@ -822,7 +846,10 @@ export function SongEditor({ jcsPath }: Props) {
 
   // ---- Save --------------------------------------------------------------
   // Capture latest state in a ref so the keydown listener reads fresh values
-  // without re-binding the listener on every keystroke.
+  // without re-binding the listener on every keystroke. cleanMidiOnImport
+  // is read from userPrefs at save time — toggling the Settings switch
+  // mid-edit takes effect on the next save without re-binding.
+  const cleanMidiOnImport = state.userPrefs.cleanMidiOnImport;
   const saveStateRef = useRef({
     snapshot: editor.current,
     songFolder,
@@ -830,6 +857,7 @@ export function SongEditor({ jcsPath }: Props) {
     saving,
     jcsPath,
     songName,
+    cleanMidiOnImport,
   });
   saveStateRef.current = {
     snapshot: editor.current,
@@ -838,6 +866,7 @@ export function SongEditor({ jcsPath }: Props) {
     saving,
     jcsPath,
     songName,
+    cleanMidiOnImport,
   };
 
   /** Open the save dialog. The dialog drives the actual save / save-as. */
@@ -859,7 +888,8 @@ export function SongEditor({ jcsPath }: Props) {
     setSaveError(null);
     try {
       for (const { sourcePath } of s.snapshot.pendingCopies.values()) {
-        await copyIntoFolder(sourcePath, s.songFolder);
+        const destPath = await copyIntoFolder(sourcePath, s.songFolder);
+        await maybeAutoCleanMidi(destPath, s.cleanMidiOnImport);
       }
       const list = await listAudioFiles(s.songFolder);
       const assigned = new Set(
@@ -935,7 +965,8 @@ export function SongEditor({ jcsPath }: Props) {
         );
         // Step 2: pendingCopies into the new folder.
         for (const { sourcePath } of s.snapshot.pendingCopies.values()) {
-          await copyIntoFolder(sourcePath, created.folderPath);
+          const destPath = await copyIntoFolder(sourcePath, created.folderPath);
+          await maybeAutoCleanMidi(destPath, s.cleanMidiOnImport);
         }
         // Step 3: probe + recompute longest.
         const list = await listAudioFiles(created.folderPath);
@@ -1122,6 +1153,44 @@ export function SongEditor({ jcsPath }: Props) {
           }
           channelSampleRates={channelSampleRates}
           channelMeta={channelMeta}
+          midiClean={(() => {
+            const f = draftSong.midiFile?.filename;
+            if (!f) return null;
+            const info = folderFiles.find((x) => x.filename === f);
+            return info?.isMidiClean ?? null;
+          })()}
+          onCleanMidi={async () => {
+            const f = draftSong.midiFile?.filename;
+            if (!f) return;
+            const info = folderFiles.find((x) => x.filename === f);
+            if (!info) return;
+            // Confirm before modifying user files. The badge click is
+            // the only path through here — the Settings retroactive
+            // sweep calls cleanMidiFile() directly, with its own
+            // dedicated confirm.
+            const proceed = await ask(
+              `This will clean "${f}" inside the song folder, removing meta events ` +
+                `(markers, key signatures, etc.) that may cause spurious patch changes ` +
+                `on a live MIDI port.\n\n` +
+                `The original file in your source folder is not modified.\n\n` +
+                `Clean now?`,
+              {
+                title: "Clean MIDI file?",
+                kind: "info",
+                okLabel: "Clean",
+                cancelLabel: "Cancel",
+              },
+            );
+            if (!proceed) return;
+            try {
+              await cleanMidiFile(info.path);
+              // Re-list to refresh the badge.
+              const list = await listAudioFiles(songFolder);
+              setFolderFiles(list);
+            } catch (err) {
+              console.error("Manual clean failed:", err);
+            }
+          }}
           selectedChannel={state.channelSelection}
           onSelectChannel={handleSelectChannel}
           onDropFile={(file, channel, mode) =>

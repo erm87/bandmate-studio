@@ -54,6 +54,19 @@ interface Props {
    * user can see the track spec at a glance.
    */
   channelMeta: Map<number, ChannelMeta>;
+  /**
+   * MIDI cleanliness for the song's assigned MIDI file:
+   *   - true:  clean (only keep-list events)
+   *   - false: contains strip-list meta events — badge shows amber
+   *   - null:  no MIDI file assigned, or unparseable — no badge
+   */
+  midiClean: boolean | null;
+  /**
+   * Manual "Clean now" trigger. Invoked by clicking the amber "Not
+   * clean" badge on the MIDI row. Async because the clean is a Tauri
+   * roundtrip; the row swaps to a busy state while it awaits.
+   */
+  onCleanMidi: () => Promise<void>;
   /** Currently-selected channel index, or null if none. */
   selectedChannel: number | null;
   /** Toggle selection of a channel. Pass `null` to clear. */
@@ -164,6 +177,8 @@ export function ChannelGrid({
   longestDurationSeconds,
   channelSampleRates,
   channelMeta,
+  midiClean,
+  onCleanMidi,
   selectedChannel,
   onSelectChannel,
   onDropFile,
@@ -339,6 +354,8 @@ export function ChannelGrid({
                 key="midi"
                 label={channelLabels[idx] ?? "MIDI"}
                 filename={midi?.filename ?? null}
+                cleanState={midiClean}
+                onClean={onCleanMidi}
                 isSelected={isSelected}
                 isDragOver={isDragOver}
                 dragMode={dragMode}
@@ -899,9 +916,60 @@ function StopwatchIcon({ className }: { className?: string }) {
   );
 }
 
+/**
+ * Small pill rendered next to a MIDI filename indicating whether the
+ * file contains only keep-list events (clean) or has strip-list meta
+ * events that may cause spurious patch changes on a live MIDI port.
+ *
+ * The "Not clean" pill is a button — clicking runs the cleaner in
+ * place. Hover tooltip explains the consequence so the user
+ * understands what the badge means without having to read settings.
+ *
+ * Renders nothing for `cleanState === null` (no MIDI file, or a file
+ * we couldn't parse — no useful claim to make).
+ */
+function MidiCleanBadge({
+  cleanState,
+  cleaning,
+  onClean,
+}: {
+  cleanState: boolean | null;
+  cleaning: boolean;
+  onClean: (e: React.MouseEvent) => void;
+}) {
+  if (cleanState === null) return null;
+  if (cleanState === true) {
+    return (
+      <span
+        className="shrink-0 rounded bg-emerald-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300"
+        title="Contains only events that should reach a downstream device. Safe to send to BandMate."
+      >
+        Clean
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={onClean}
+      disabled={cleaning}
+      title={
+        cleaning
+          ? "Cleaning…"
+          : "Contains meta events (markers, key sigs, etc.) that may cause spurious patch changes on a live MIDI port. Click to clean in place."
+      }
+      className="shrink-0 cursor-pointer rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-amber-700 transition hover:bg-amber-200 disabled:cursor-wait disabled:opacity-60 dark:bg-amber-950/40 dark:text-amber-300 dark:hover:bg-amber-900/60"
+    >
+      {cleaning ? "Cleaning…" : "Not clean"}
+    </button>
+  );
+}
+
 function MidiRow({
   label,
   filename,
+  cleanState,
+  onClean,
   isSelected,
   isDragOver,
   dragMode,
@@ -912,6 +980,10 @@ function MidiRow({
 }: {
   label: string;
   filename: string | null;
+  /** True = clean, false = needs cleaning, null = unknown / no file. */
+  cleanState: boolean | null;
+  /** Trigger a clean on the assigned MIDI file. */
+  onClean: () => Promise<void>;
   isSelected: boolean;
   isDragOver: boolean;
   dragMode: DropMode | null;
@@ -924,6 +996,17 @@ function MidiRow({
     onDrop: (e: React.DragEvent) => void;
   };
 }) {
+  const [cleaning, setCleaning] = useState(false);
+  const handleClean = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    if (cleaning) return;
+    setCleaning(true);
+    try {
+      await onClean();
+    } finally {
+      setCleaning(false);
+    }
+  };
   // MIDI slot is fixed at index 24, so shift modes don't really apply
   // — but we still highlight the same way (the parent caps mode at
   // "replace" for the MIDI slot anyway, since computeMode only
@@ -994,8 +1077,16 @@ function MidiRow({
           <span className="italic text-zinc-400 dark:text-zinc-600">—</span>
         )}
       </span>
-      <span />
-      <span />
+      {/* MIDI rows don't use the Lvl/Pan columns — repurpose them as the
+          badge slot. col-span-2 across the two 40px slots gives ~80px
+          which fits "Not clean" without forcing the filename to truncate. */}
+      <span className="col-span-2 flex items-center justify-end pr-1">
+        <MidiCleanBadge
+          cleanState={cleanState}
+          cleaning={cleaning}
+          onClean={handleClean}
+        />
+      </span>
       {/* Trailing slot: × button when MIDI is selected and has an
           assignment. MIDI can't move (slot 24 is fixed), so no
           ↑ / ↓ buttons. */}

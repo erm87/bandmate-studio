@@ -20,6 +20,7 @@ import { cn } from "../lib/cn";
 import { revealInFileManager } from "../fs/workingFolder";
 import { ContextMenu, type OpenContextMenu } from "./ContextMenu";
 import { ExportToUsbDialog } from "./ExportToUsbDialog";
+import { SettingsDialog } from "./SettingsDialog";
 import joecoLogoNeon from "../assets/joeco-logo-neon.png";
 import joecoLogoWhite from "../assets/joeco-logo-white.png";
 
@@ -28,6 +29,7 @@ export function WorkingFolderBar() {
   const path = state.workingFolder;
   const [contextMenu, setContextMenu] = useState<OpenContextMenu | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   if (!path) return null;
   const isLoading = state.status === "loading";
 
@@ -103,11 +105,18 @@ export function WorkingFolderBar() {
         >
           Export to USB
         </button>
+        <IconButton onClick={() => setSettingsOpen(true)} title="Settings">
+          <GearIcon className="h-4 w-4" />
+        </IconButton>
       </div>
       <ContextMenu menu={contextMenu} onClose={() => setContextMenu(null)} />
       <ExportToUsbDialog
         isOpen={exportOpen}
         onClose={() => setExportOpen(false)}
+      />
+      <SettingsDialog
+        isOpen={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
       />
     </header>
   );
@@ -180,6 +189,36 @@ function IconButton({
     >
       {children}
     </button>
+  );
+}
+
+/**
+ * Inline gear icon — opens the Settings page. Standard 8-tooth
+ * sprocket with a center hole; matches the affordance most desktop
+ * apps use for "Settings".
+ *
+ * Path is hand-crafted: the outer shape is a 24-vertex polygon
+ * alternating between a tooth tip (radius 11) and a tooth root
+ * (radius 7.7), with each pair offset 22.5° from the previous —
+ * yielding the classic gear silhouette in a small viewBox. The inner
+ * circle (r=3.5) is the hub. Both are stroked, matching the rest of
+ * our header iconography.
+ */
+function GearIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={className}
+    >
+      <path d="M19.4 14.5a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V20.5a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 5 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9.5A1.65 1.65 0 0 0 10.5 3.09V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9c.26.6.86 1 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+      <circle cx="12" cy="12" r="3" />
+    </svg>
   );
 }
 

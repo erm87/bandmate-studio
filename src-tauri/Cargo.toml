@@ -27,6 +27,13 @@ hound = "3.5"
 # Phase-6 use: enumerate mounted USB drives.
 sysinfo = "0.32"
 
+# MIDI cleaning (Phase 7): SMF parser/writer. midly is a zero-copy
+# SMF library we use to detect and strip non-essential meta events
+# from MIDI files imported into song folders. See MANUAL_ADDITIONS.md
+# for the rules (Kemper-bound MIDI tracks must contain ONLY the
+# events the device should respond to).
+midly = "0.5"
+
 [features]
 # This feature is used by Tauri to identify production builds.
 default = ["custom-protocol"]
