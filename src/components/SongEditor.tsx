@@ -70,6 +70,12 @@ interface PendingCopy {
    * know about it. Used both to flag rate-mismatch in the channel
    * grid AND to populate the row tooltip / drag-image label with the
    * track's spec line ("44.1 kHz · mono · 3:21").
+   *
+   * MIDI pending copies (keyed at MIDI_CHANNEL_INDEX) populate these
+   * with zeros — the channel-meta UI only iterates `audioFiles` so
+   * the zero values never reach a render path. The save loop reads
+   * only `sourcePath` so the metadata fields don't matter for the
+   * actual copy.
    */
   sampleRate: number;
   channels: number;
@@ -233,6 +239,14 @@ export function SongEditor({ jcsPath }: Props) {
   const [trackMap, setTrackMap] = useState<TrackMap | null>(null);
   const [trackMapSource, setTrackMapSource] = useState<string | null>(null);
   const [longestFilename, setLongestFilename] = useState<string | null>(null);
+  /**
+   * Counter bumped after save / save-as / manual MIDI clean. Threaded
+   * to SourceFilesPane's Song Folder tab so its file listing (and any
+   * cleanliness badges) re-fetch after the song folder mutates.
+   * Without this the tab keeps stale "Not clean" pills on files that
+   * were just cleaned in place.
+   */
+  const [songFolderRefreshKey, setSongFolderRefreshKey] = useState(0);
   /**
    * The song folder's WAV listing — used both to identify the longest
    * file and to surface per-channel rate-mismatch warnings in the grid.
@@ -617,6 +631,10 @@ export function SongEditor({ jcsPath }: Props) {
           );
           nextSong = { ...snap.song, audioFiles: reassigned };
         }
+        // Track files outside the song folder so performSave can copy
+        // them in. Same logic for WAV and MIDI: in-folder → no-op
+        // (file is already in place); out-of-folder → record a
+        // pendingCopy keyed by the target channel.
         if (file.kind === "wav") {
           if (isInSongFolder) {
             nextCopies.delete(targetChannel);
@@ -627,6 +645,20 @@ export function SongEditor({ jcsPath }: Props) {
               sampleRate: file.wavInfo?.sampleRate ?? 0,
               channels: file.wavInfo?.channels ?? 1,
               durationSeconds: file.wavInfo?.durationSeconds ?? 0,
+            });
+          }
+        } else if (file.kind === "mid") {
+          if (isInSongFolder) {
+            nextCopies.delete(targetChannel);
+          } else {
+            nextCopies.set(targetChannel, {
+              sourcePath: file.path,
+              filename: file.filename,
+              // MIDI has no audio metadata; zeros are sentinels
+              // (never rendered — see PendingCopy docstring).
+              sampleRate: 0,
+              channels: 0,
+              durationSeconds: 0,
             });
           }
         }
@@ -925,6 +957,9 @@ export function SongEditor({ jcsPath }: Props) {
         };
       });
       setLongestFilename(newLongest);
+      // Bump so SourceFilesPane's Song Folder tab re-lists — files
+      // may have been copied in and / or auto-cleaned in place.
+      setSongFolderRefreshKey((k) => k + 1);
       await rescan();
     } catch (e) {
       setSaveError(e instanceof Error ? e.message : String(e));
@@ -1184,9 +1219,12 @@ export function SongEditor({ jcsPath }: Props) {
             if (!proceed) return;
             try {
               await cleanMidiFile(info.path);
-              // Re-list to refresh the badge.
+              // Re-list to refresh the channel-grid badge…
               const list = await listAudioFiles(songFolder);
               setFolderFiles(list);
+              // …and bump the SourceFilesPane's Song Folder tab so its
+              // cleanliness pill flips alongside.
+              setSongFolderRefreshKey((k) => k + 1);
             } catch (err) {
               console.error("Manual clean failed:", err);
             }
@@ -1205,6 +1243,7 @@ export function SongEditor({ jcsPath }: Props) {
           sourceFolder={sourceFolder}
           songSampleRate={draftSong.sampleRate}
           channelSelected={state.channelSelection !== null}
+          songFolderRefreshKey={songFolderRefreshKey}
           onSelectFile={handleSelectSourceFile}
           onChangeSourceFolder={(path) => handleChangeSourceFolder(path)}
           onClearSourceFolder={() => handleChangeSourceFolder(null)}
