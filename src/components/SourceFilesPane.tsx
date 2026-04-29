@@ -65,6 +65,13 @@ interface Props {
    * clears the sidecar entry.
    */
   onClearSourceFolder: () => void;
+  /**
+   * Bump this number to force the Song Folder tab to re-list its
+   * files. Needed after save (auto-clean may have rewritten a MIDI
+   * file in place) or after a manual clean. The Source Folder tab
+   * doesn't need it — source files are never modified by us.
+   */
+  songFolderRefreshKey?: number;
 }
 
 export function SourceFilesPane({
@@ -75,6 +82,7 @@ export function SourceFilesPane({
   onSelectFile,
   onChangeSourceFolder,
   onClearSourceFolder,
+  songFolderRefreshKey,
 }: Props) {
   // Default to whichever tab is more useful: source if one's set, else
   // song folder. The pane remounts per song (SongEditor uses a `key`),
@@ -94,6 +102,10 @@ export function SourceFilesPane({
       {activeTab === "song" ? (
         <FolderView
           folder={songFolder}
+          // Bump on save / manual clean so MIDI cleanliness badges
+          // reflect the post-clean state. Source-folder files don't
+          // need this — we never modify them.
+          refreshKey={songFolderRefreshKey ?? 0}
           helper={
             <>
               Files already imported into this song. These ship to the
@@ -115,6 +127,7 @@ export function SourceFilesPane({
       ) : sourceFolder ? (
         <FolderView
           folder={sourceFolder}
+          refreshKey={0}
           helper={
             <>
               Unimported files from an external folder (e.g., a Logic export).
@@ -223,6 +236,7 @@ function TabButton({
 
 function FolderView({
   folder,
+  refreshKey,
   helper,
   songSampleRate,
   channelSelected,
@@ -231,6 +245,13 @@ function FolderView({
   emptyHint,
 }: {
   folder: string;
+  /**
+   * Bumping this number forces a re-list of `folder`. Used by the
+   * Song Folder tab so MIDI cleanliness badges reflect post-save and
+   * post-manual-clean state. The Source Folder tab passes 0 (we never
+   * modify source files, so no refresh is needed).
+   */
+  refreshKey: number;
   helper: React.ReactNode;
   songSampleRate: number;
   channelSelected: boolean;
@@ -260,7 +281,7 @@ function FolderView({
     return () => {
       cancelled = true;
     };
-  }, [folder]);
+  }, [folder, refreshKey]);
 
   const audioFiles = files.filter((f) => f.kind === "wav");
   const midiFiles = files.filter((f) => f.kind === "mid");
