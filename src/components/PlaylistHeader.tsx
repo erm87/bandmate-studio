@@ -38,6 +38,8 @@ interface Props {
   canRedo: boolean;
   onUndo: () => void;
   onRedo: () => void;
+  /** Open the Undo History panel (also available via ⌥⌘Z). */
+  onOpenHistory: () => void;
 }
 
 export function PlaylistHeader({
@@ -57,6 +59,7 @@ export function PlaylistHeader({
   canRedo,
   onUndo,
   onRedo,
+  onOpenHistory,
 }: Props) {
   const totalLabel =
     totalDurationSeconds === null ? "—" : formatDuration(totalDurationSeconds);
@@ -135,6 +138,14 @@ export function PlaylistHeader({
             ariaLabel="Redo"
           >
             <RedoIcon className="h-3.5 w-3.5" />
+          </HistoryButton>
+          <HistoryButton
+            onClick={onOpenHistory}
+            disabled={false}
+            title="Show undo history (⌥⌘Z)"
+            ariaLabel="Show undo history"
+          >
+            <HistoryIcon className="h-3.5 w-3.5" />
           </HistoryButton>
         </div>
 
@@ -309,6 +320,26 @@ function RedoIcon({ className }: { className?: string }) {
     >
       <path d="M12.5 7.5H6a3.5 3.5 0 0 0 0 7h3" />
       <path d="M10 4l2.5 3.5L10 11" />
+    </svg>
+  );
+}
+
+/** Clock-with-curved-arrow glyph, the conventional "history" icon. */
+function HistoryIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      viewBox="0 0 16 16"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.6"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+      className={className}
+    >
+      <path d="M2.5 8a5.5 5.5 0 1 0 1.6-3.9" />
+      <path d="M2 3v3h3" />
+      <path d="M8 5v3l2 1.5" />
     </svg>
   );
 }

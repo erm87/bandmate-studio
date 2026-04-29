@@ -26,14 +26,19 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ask } from "@tauri-apps/plugin-dialog";
 import {
   parsePlaylist,
   parseSong,
   writePlaylist,
   type Playlist,
 } from "../codec";
-import { readTextFile, writeTextFile } from "../fs/workingFolder";
+import {
+  createPlaylist,
+  readTextFile,
+  writeTextFile,
+} from "../fs/workingFolder";
+import { suggestDuplicateName } from "../lib/references";
+import { diffPlaylists } from "../lib/snapshotDiff";
 import { useAppState } from "../state/AppState";
 import { cn } from "../lib/cn";
 import {
@@ -43,6 +48,8 @@ import {
 } from "../lib/dnd";
 import { AvailableSongsPane } from "./AvailableSongsPane";
 import { PlaylistHeader } from "./PlaylistHeader";
+import { SaveConfirmDialog } from "./SaveConfirmDialog";
+import { UndoHistoryPanel } from "./UndoHistoryPanel";
 
 interface Props {
   jcpPath: string;
@@ -81,6 +88,8 @@ export function PlaylistEditor({ jcpPath }: Props) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   /**
    * Per-song metadata, keyed by folder name. Built by reading every
    * `.jcs` in the working folder when the editor mounts (or after a
@@ -145,6 +154,21 @@ export function PlaylistEditor({ jcpPath }: Props) {
         past: [...e.past, e.current].slice(-HISTORY_LIMIT),
         current: next,
         future: e.future.slice(1),
+        baseline: e.baseline,
+      };
+    });
+  }, []);
+
+  /** Jump to a specific snapshot — see SongEditor.jumpToHistoryIndex. */
+  const jumpToHistoryIndex = useCallback((targetIdx: number) => {
+    setEditor((e) => {
+      if (!e.current) return e;
+      const flat = [...e.past, e.current, ...e.future];
+      if (targetIdx < 0 || targetIdx >= flat.length) return e;
+      return {
+        past: flat.slice(0, targetIdx),
+        current: flat[targetIdx]!,
+        future: flat.slice(targetIdx + 1),
         baseline: e.baseline,
       };
     });
@@ -377,28 +401,21 @@ export function PlaylistEditor({ jcpPath }: Props) {
     displayName: playlistDisplayName,
   };
 
-  const handleSave = useCallback(async () => {
+  const handleSave = useCallback(() => {
     const s = saveStateRef.current;
     if (!s.snapshot || s.saving || !s.isDirty) return;
+    setSaveDialogOpen(true);
+  }, []);
 
-    const confirmed = await ask(
-      `Save changes to "${s.displayName}"?\n\nThis will overwrite the existing .jcp file.`,
-      {
-        title: "Save Playlist",
-        kind: "info",
-        okLabel: "Save",
-        cancelLabel: "Cancel",
-      },
-    );
-    if (!confirmed) return;
-
+  /** Persist to the existing .jcp path. */
+  const performSave = useCallback(async () => {
+    const s = saveStateRef.current;
+    if (!s.snapshot) return;
     setSaving(true);
     setSaveError(null);
     try {
       const text = writePlaylist(s.snapshot.playlist);
       await writeTextFile(s.jcpPath, text);
-      // New baseline = current state. Don't clear past/future; undo
-      // across save is allowed (matches SongEditor behavior).
       setEditor((e) => ({
         past: e.past,
         current: e.current,
@@ -408,10 +425,46 @@ export function PlaylistEditor({ jcpPath }: Props) {
       await rescan();
     } catch (e) {
       setSaveError(e instanceof Error ? e.message : String(e));
+      throw e;
     } finally {
       setSaving(false);
     }
   }, [rescan]);
+
+  /**
+   * Save the current snapshot to a brand-new .jcp under `newName`.
+   * The original is untouched. After success we navigate to the new
+   * playlist (same convention as SongEditor's Save As).
+   */
+  const performSaveAs = useCallback(
+    async (newName: string) => {
+      const s = saveStateRef.current;
+      if (!s.snapshot || !state.workingFolder) return;
+      setSaving(true);
+      setSaveError(null);
+      try {
+        const created = await createPlaylist(state.workingFolder, newName);
+        // The new playlist has the new display name baked in (so the
+        // BandMate's on-screen label tracks the filename).
+        const newPlaylist: Playlist = {
+          ...s.snapshot.playlist,
+          displayName: newName,
+        };
+        await writeTextFile(created.jcpPath, writePlaylist(newPlaylist));
+        await rescan();
+        dispatch({
+          type: "select",
+          selection: { kind: "playlist", path: created.jcpPath },
+        });
+      } catch (e) {
+        setSaveError(e instanceof Error ? e.message : String(e));
+        throw e;
+      } finally {
+        setSaving(false);
+      }
+    },
+    [dispatch, rescan, state.workingFolder],
+  );
 
   // ---- Keyboard handlers --------------------------------------------------
   useEffect(() => {
@@ -424,7 +477,15 @@ export function PlaylistEditor({ jcpPath }: Props) {
         void handleSave();
         return;
       }
-      if (meta && key === "z") {
+      // Use e.code (physical key) rather than e.key — macOS rewrites
+      // e.key when Option is held (⌥Z → "Ω"), so the history shortcut
+      // wouldn't match.
+      if (meta && e.code === "KeyZ") {
+        if (e.altKey) {
+          e.preventDefault();
+          setHistoryOpen((cur) => !cur);
+          return;
+        }
         e.preventDefault();
         if (e.shiftKey) {
           redo();
@@ -564,6 +625,7 @@ export function PlaylistEditor({ jcpPath }: Props) {
         canRedo={canRedo}
         onUndo={undo}
         onRedo={redo}
+        onOpenHistory={() => setHistoryOpen(true)}
       />
 
       {(missingCount > 0 || mismatchCount > 0) && (
@@ -594,6 +656,60 @@ export function PlaylistEditor({ jcpPath }: Props) {
           onAdd={handleAddSong}
         />
       </div>
+
+      <UndoHistoryPanel
+        isOpen={historyOpen}
+        pastCount={editor.past.length}
+        futureCount={editor.future.length}
+        baselineIndex={(() => {
+          if (!editor.baseline || !editor.current) return null;
+          const flat = [...editor.past, editor.current, ...editor.future];
+          const baselineKey = writePlaylist(editor.baseline.playlist);
+          for (let i = 0; i < flat.length; i++) {
+            if (writePlaylist(flat[i]!.playlist) === baselineKey) return i;
+          }
+          return null;
+        })()}
+        entryLabels={(() => {
+          if (!editor.current) return undefined;
+          const flat = [...editor.past, editor.current, ...editor.future];
+          return flat.map((snap, i) =>
+            i === 0
+              ? "Initial state"
+              : diffPlaylists(flat[i - 1]!.playlist, snap.playlist),
+          );
+        })()}
+        onJumpTo={(idx) => jumpToHistoryIndex(idx)}
+        onClose={() => setHistoryOpen(false)}
+      />
+
+      <SaveConfirmDialog
+        isOpen={saveDialogOpen}
+        title="Save Playlist"
+        subjectName={playlistDisplayName}
+        message={
+          <>
+            Overwrites the existing{" "}
+            <span className="font-mono">.jcp</span> file. Songs referenced
+            inside it are unaffected.
+          </>
+        }
+        existingNames={
+          new Set(
+            state.scan.playlists.map((p) => p.filename.replace(/\.jcp$/i, "")),
+          )
+        }
+        defaultNewName={suggestDuplicateName(
+          playlistDisplayName,
+          new Set(
+            state.scan.playlists.map((p) => p.filename.replace(/\.jcp$/i, "")),
+          ),
+        )}
+        itemKind="playlist"
+        onSave={performSave}
+        onSaveAs={performSaveAs}
+        onClose={() => setSaveDialogOpen(false)}
+      />
     </main>
   );
 }

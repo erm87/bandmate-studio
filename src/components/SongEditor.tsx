@@ -26,7 +26,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ask, message } from "@tauri-apps/plugin-dialog";
+import { message } from "@tauri-apps/plugin-dialog";
 import {
   parseSong,
   parseTrackMap,
@@ -39,17 +39,22 @@ import {
 import { TRACK_MAP_CHANNEL_COUNT, MIDI_CHANNEL_INDEX } from "../codec";
 import {
   copyIntoFolder,
+  duplicateSong,
   listAudioFiles,
   readSongSidecar,
   readTextFile,
   writeSongSidecar,
   writeTextFile,
 } from "../fs/workingFolder";
+import { suggestDuplicateName } from "../lib/references";
+import { diffSongs } from "../lib/snapshotDiff";
 import type { AudioFileInfo } from "../fs/types";
 import { useAppState } from "../state/AppState";
 import { ChannelGrid } from "./ChannelGrid";
+import { SaveConfirmDialog } from "./SaveConfirmDialog";
 import { SongHeader } from "./SongHeader";
 import { SourceFilesPane } from "./SourceFilesPane";
+import { UndoHistoryPanel } from "./UndoHistoryPanel";
 
 interface Props {
   jcsPath: string;
@@ -199,6 +204,8 @@ export function SongEditor({ jcsPath }: Props) {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const [trackMap, setTrackMap] = useState<TrackMap | null>(null);
   const [trackMapSource, setTrackMapSource] = useState<string | null>(null);
   const [longestFilename, setLongestFilename] = useState<string | null>(null);
@@ -285,6 +292,31 @@ export function SongEditor({ jcsPath }: Props) {
         past: [...e.past, e.current].slice(-HISTORY_LIMIT),
         current: next,
         future: e.future.slice(1),
+        baseline: e.baseline,
+      };
+    });
+  }, []);
+
+  /**
+   * Jump to a specific snapshot by its flat-list index. Used by the
+   * Undo History panel — clicking an entry calls this with the
+   * entry's index.
+   *
+   * Flat-list layout: [past[0], past[1], …, past[n-1], current,
+   * future[0], future[1], …]. Slicing rebuilds the past / current /
+   * future buckets so the snapshot at `targetIdx` becomes the new
+   * `current`. Baseline carries through unchanged (it's a reference
+   * to one of the snapshots in the flat list, which doesn't reorder).
+   */
+  const jumpToHistoryIndex = useCallback((targetIdx: number) => {
+    setEditor((e) => {
+      if (!e.current) return e;
+      const flat = [...e.past, e.current, ...e.future];
+      if (targetIdx < 0 || targetIdx >= flat.length) return e;
+      return {
+        past: flat.slice(0, targetIdx),
+        current: flat[targetIdx]!,
+        future: flat.slice(targetIdx + 1),
         baseline: e.baseline,
       };
     });
@@ -808,36 +840,31 @@ export function SongEditor({ jcsPath }: Props) {
     songName,
   };
 
-  const handleSave = useCallback(async () => {
+  /** Open the save dialog. The dialog drives the actual save / save-as. */
+  const handleSave = useCallback(() => {
     const s = saveStateRef.current;
     if (!s.snapshot || s.saving || !s.isDirty) return;
+    setSaveDialogOpen(true);
+  }, []);
 
-    // Native confirm dialog (Tauri's plugin-dialog → real macOS NSAlert).
-    const confirmed = await ask(
-      `Save changes to "${s.songName}"?\n\nThis will overwrite the existing .jcs file` +
-        (s.snapshot.pendingCopies.size > 0
-          ? ` and copy ${s.snapshot.pendingCopies.size} new file(s) into the song folder.`
-          : "."),
-      {
-        title: "Save Song",
-        kind: "info",
-        okLabel: "Save",
-        cancelLabel: "Cancel",
-      },
-    );
-    if (!confirmed) return;
-
+  /**
+   * Persist the current snapshot to its existing on-disk path (the
+   * "Save" branch of the confirm dialog). Copies any pending files,
+   * recomputes lengthSamples, writes the .jcs, then updates baseline.
+   */
+  const performSave = useCallback(async () => {
+    const s = saveStateRef.current;
+    if (!s.snapshot) return;
     setSaving(true);
     setSaveError(null);
     try {
-      // 1. Copy any pending files into the song folder
       for (const { sourcePath } of s.snapshot.pendingCopies.values()) {
         await copyIntoFolder(sourcePath, s.songFolder);
       }
-
-      // 2. Recompute lengthSamples from the longest WAV in the assigned set
       const list = await listAudioFiles(s.songFolder);
-      const assigned = new Set(s.snapshot.song.audioFiles.map((f) => f.filename));
+      const assigned = new Set(
+        s.snapshot.song.audioFiles.map((f) => f.filename),
+      );
       let maxSamples = 0;
       let newLongest: string | null = null;
       for (const f of list) {
@@ -849,14 +876,12 @@ export function SongEditor({ jcsPath }: Props) {
           newLongest = f.filename;
         }
       }
-      const finalSong: Song = { ...s.snapshot.song, lengthSamples: maxSamples };
-
-      // 3. Write the .jcs
+      const finalSong: Song = {
+        ...s.snapshot.song,
+        lengthSamples: maxSamples,
+      };
       const text = writeSong(finalSong);
       await writeTextFile(s.jcsPath, text);
-
-      // 4. New baseline = current state (with the recomputed length).
-      //    We DON'T clear past/future — undo across save is allowed.
       setEditor((e) => {
         const newCurrent: EditorSnapshot = {
           song: finalSong,
@@ -870,15 +895,87 @@ export function SongEditor({ jcsPath }: Props) {
         };
       });
       setLongestFilename(newLongest);
-
-      // 5. Refresh the working-folder scan
       await rescan();
     } catch (e) {
       setSaveError(e instanceof Error ? e.message : String(e));
+      throw e;
     } finally {
       setSaving(false);
     }
   }, [rescan]);
+
+  /**
+   * Save the current snapshot to a brand-new song folder under
+   * `newName`, leaving the original untouched. After success we
+   * navigate to the duplicate so the user keeps editing the new
+   * copy (matches macOS Save-As convention).
+   *
+   * Steps:
+   *   1. duplicateSong(currentName, newName) — Rust copies the whole
+   *      folder + renames the inner .jcs.
+   *   2. Copy any pendingCopies into the new folder (these are files
+   *      not yet on disk; the duplicate didn't have them).
+   *   3. Re-probe + recompute lengthSamples in the new folder.
+   *   4. Write the in-memory .jcs to the new path (overwrites the
+   *      copy from step 1, which had pre-edit content).
+   *   5. Carry over the source-folder sidecar (if any).
+   *   6. Rescan + dispatch select.
+   */
+  const performSaveAs = useCallback(
+    async (newName: string) => {
+      const s = saveStateRef.current;
+      if (!s.snapshot || !state.workingFolder) return;
+      setSaving(true);
+      setSaveError(null);
+      try {
+        const created = await duplicateSong(
+          state.workingFolder,
+          songName,
+          newName,
+        );
+        // Step 2: pendingCopies into the new folder.
+        for (const { sourcePath } of s.snapshot.pendingCopies.values()) {
+          await copyIntoFolder(sourcePath, created.folderPath);
+        }
+        // Step 3: probe + recompute longest.
+        const list = await listAudioFiles(created.folderPath);
+        const assigned = new Set(
+          s.snapshot.song.audioFiles.map((f) => f.filename),
+        );
+        let maxSamples = 0;
+        for (const f of list) {
+          if (f.kind !== "wav") continue;
+          if (!assigned.has(f.filename)) continue;
+          const samples = f.wavInfo?.durationSamples ?? 0;
+          if (samples > maxSamples) maxSamples = samples;
+        }
+        const finalSong: Song = {
+          ...s.snapshot.song,
+          lengthSamples: maxSamples,
+        };
+        // Step 4: write the .jcs with current edits.
+        await writeTextFile(created.jcsPath, writeSong(finalSong));
+        // Step 5: carry over sidecar source folder.
+        if (sourceFolder) {
+          await writeSongSidecar(created.folderPath, { sourceFolder });
+        }
+        // Step 6: rescan + jump to the new copy. SongEditor remounts
+        // on jcsPath change (via key), so the new editor instance
+        // starts fresh with baseline = current — non-dirty.
+        await rescan();
+        dispatch({
+          type: "select",
+          selection: { kind: "song", jcsPath: created.jcsPath },
+        });
+      } catch (e) {
+        setSaveError(e instanceof Error ? e.message : String(e));
+        throw e;
+      } finally {
+        setSaving(false);
+      }
+    },
+    [dispatch, rescan, songName, sourceFolder, state.workingFolder],
+  );
 
   // ---- Keyboard handlers --------------------------------------------------
   useEffect(() => {
@@ -894,7 +991,18 @@ export function SongEditor({ jcsPath }: Props) {
       }
       // Cmd+Z (no shift) — undo
       // Cmd+Shift+Z or Cmd+Y — redo
-      if (meta && key === "z") {
+      // ⌥⌘Z (Alt+Cmd+Z, no shift) — toggle Undo History panel
+      //
+      // Use e.code (physical key) rather than e.key (character)
+      // because macOS rewrites e.key when Option is held — ⌥Z
+      // becomes "Ω", so `key === "z"` would never match the history
+      // shortcut.
+      if (meta && e.code === "KeyZ") {
+        if (e.altKey) {
+          e.preventDefault();
+          setHistoryOpen((cur) => !cur);
+          return;
+        }
         e.preventDefault();
         if (e.shiftKey) {
           redo();
@@ -1001,6 +1109,7 @@ export function SongEditor({ jcsPath }: Props) {
         canRedo={canRedo}
         onUndo={undo}
         onRedo={redo}
+        onOpenHistory={() => setHistoryOpen(true)}
       />
 
       <div className="flex flex-1 overflow-hidden">
@@ -1032,6 +1141,78 @@ export function SongEditor({ jcsPath }: Props) {
           onClearSourceFolder={() => handleChangeSourceFolder(null)}
         />
       </div>
+
+      <UndoHistoryPanel
+        isOpen={historyOpen}
+        pastCount={editor.past.length}
+        futureCount={editor.future.length}
+        baselineIndex={(() => {
+          // Baseline as an index into the flat list. Compare via the
+          // serialized snapshot — the baseline reference is one of
+          // the entries in the flat list (post-save = the one at
+          // pastCount; pre-save edits = the original at index 0).
+          if (!editor.baseline || !editor.current) return null;
+          const flat = [
+            ...editor.past,
+            editor.current,
+            ...editor.future,
+          ];
+          const baselineKey = writeSong(editor.baseline.song);
+          for (let i = 0; i < flat.length; i++) {
+            if (writeSong(flat[i]!.song) === baselineKey) return i;
+          }
+          return null;
+        })()}
+        entryLabels={(() => {
+          if (!editor.current) return undefined;
+          const flat = [
+            ...editor.past,
+            editor.current,
+            ...editor.future,
+          ];
+          return flat.map((snap, i) =>
+            i === 0
+              ? "Initial state"
+              : diffSongs(flat[i - 1]!.song, snap.song),
+          );
+        })()}
+        onJumpTo={(idx) => {
+          jumpToHistoryIndex(idx);
+        }}
+        onClose={() => setHistoryOpen(false)}
+      />
+
+      <SaveConfirmDialog
+        isOpen={saveDialogOpen}
+        title="Save Song"
+        subjectName={songName}
+        message={
+          <>
+            Overwrites the existing <span className="font-mono">.jcs</span>
+            {editor.current && editor.current.pendingCopies.size > 0 ? (
+              <>
+                {" and copies "}
+                {editor.current.pendingCopies.size} new file
+                {editor.current.pendingCopies.size === 1 ? "" : "s"} into
+                the song folder.
+              </>
+            ) : (
+              "."
+            )}
+          </>
+        }
+        existingNames={
+          new Set(state.scan.songs.map((s) => s.folderName))
+        }
+        defaultNewName={suggestDuplicateName(
+          songName,
+          new Set(state.scan.songs.map((s) => s.folderName)),
+        )}
+        itemKind="song"
+        onSave={performSave}
+        onSaveAs={performSaveAs}
+        onClose={() => setSaveDialogOpen(false)}
+      />
     </main>
   );
 }

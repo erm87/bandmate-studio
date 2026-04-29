@@ -30,7 +30,6 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ask } from "@tauri-apps/plugin-dialog";
 import {
   parseTrackMap,
   writeTrackMap,
@@ -38,7 +37,12 @@ import {
   TRACK_MAP_CHANNEL_COUNT,
   type TrackMap,
 } from "../codec";
-import { readTextFile, writeTextFile } from "../fs/workingFolder";
+import {
+  createTrackMap,
+  readTextFile,
+  writeTextFile,
+} from "../fs/workingFolder";
+import { suggestDuplicateName } from "../lib/references";
 import { useAppState } from "../state/AppState";
 import { cn } from "../lib/cn";
 import {
@@ -46,7 +50,10 @@ import {
   setDragImageLabel,
   setDragPayload,
 } from "../lib/dnd";
+import { diffTrackMaps } from "../lib/snapshotDiff";
+import { SaveConfirmDialog } from "./SaveConfirmDialog";
 import { TrackMapHeader } from "./TrackMapHeader";
+import { UndoHistoryPanel } from "./UndoHistoryPanel";
 
 interface Props {
   jcmPath: string;
@@ -73,12 +80,14 @@ const EMPTY_EDITOR: EditorState = {
 };
 
 export function TrackMapEditor({ jcmPath }: Props) {
-  const { rescan, registerDirtyEditor } = useAppState();
+  const { state, dispatch, rescan, registerDirtyEditor } = useAppState();
 
   const [editor, setEditor] = useState<EditorState>(EMPTY_EDITOR);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   /**
    * Selected row index for the on-row arrow / clear buttons. Local
@@ -161,6 +170,21 @@ export function TrackMapEditor({ jcmPath }: Props) {
         past: [...e.past, e.current].slice(-HISTORY_LIMIT),
         current: next,
         future: e.future.slice(1),
+        baseline: e.baseline,
+      };
+    });
+  }, []);
+
+  /** Jump to a specific snapshot — see SongEditor.jumpToHistoryIndex. */
+  const jumpToHistoryIndex = useCallback((targetIdx: number) => {
+    setEditor((e) => {
+      if (!e.current) return e;
+      const flat = [...e.past, e.current, ...e.future];
+      if (targetIdx < 0 || targetIdx >= flat.length) return e;
+      return {
+        past: flat.slice(0, targetIdx),
+        current: flat[targetIdx]!,
+        future: flat.slice(targetIdx + 1),
         baseline: e.baseline,
       };
     });
@@ -312,22 +336,16 @@ export function TrackMapEditor({ jcmPath }: Props) {
     fileBasename,
   };
 
-  const handleSave = useCallback(async () => {
+  const handleSave = useCallback(() => {
     const s = saveStateRef.current;
     if (!s.snapshot || s.saving || !s.isDirty) return;
+    setSaveDialogOpen(true);
+  }, []);
 
-    const confirmed = await ask(
-      `Save changes to "${s.fileBasename}"?\n\nThis will overwrite the existing .jcm file. ` +
-        "Playlists that reference it by filename are unaffected.",
-      {
-        title: "Save Track Map",
-        kind: "info",
-        okLabel: "Save",
-        cancelLabel: "Cancel",
-      },
-    );
-    if (!confirmed) return;
-
+  /** Persist to the existing .jcm path. */
+  const performSave = useCallback(async () => {
+    const s = saveStateRef.current;
+    if (!s.snapshot) return;
     setSaving(true);
     setSaveError(null);
     try {
@@ -342,10 +360,36 @@ export function TrackMapEditor({ jcmPath }: Props) {
       await rescan();
     } catch (e) {
       setSaveError(e instanceof Error ? e.message : String(e));
+      throw e;
     } finally {
       setSaving(false);
     }
   }, [rescan]);
+
+  /** Save current snapshot to a new .jcm under `newName`. */
+  const performSaveAs = useCallback(
+    async (newName: string) => {
+      const s = saveStateRef.current;
+      if (!s.snapshot || !state.workingFolder) return;
+      setSaving(true);
+      setSaveError(null);
+      try {
+        const created = await createTrackMap(state.workingFolder, newName);
+        await writeTextFile(created.jcmPath, writeTrackMap(s.snapshot.map));
+        await rescan();
+        dispatch({
+          type: "select",
+          selection: { kind: "trackMap", path: created.jcmPath },
+        });
+      } catch (e) {
+        setSaveError(e instanceof Error ? e.message : String(e));
+        throw e;
+      } finally {
+        setSaving(false);
+      }
+    },
+    [dispatch, rescan, state.workingFolder],
+  );
 
   // ---- Keyboard handlers --------------------------------------------------
   useEffect(() => {
@@ -370,7 +414,16 @@ export function TrackMapEditor({ jcmPath }: Props) {
       // Don't steal Cmd+Z/Y from focused inputs — they have their
       // own undo. Editor-level undo only fires when focus is outside
       // any input.
-      if (!isTextInput && meta && key === "z") {
+      //
+      // Use e.code (physical key) rather than e.key — macOS rewrites
+      // e.key when Option is held (⌥Z → "Ω"), so the history shortcut
+      // wouldn't match.
+      if (!isTextInput && meta && e.code === "KeyZ") {
+        if (e.altKey) {
+          e.preventDefault();
+          setHistoryOpen((cur) => !cur);
+          return;
+        }
         e.preventDefault();
         if (e.shiftKey) {
           redo();
@@ -446,6 +499,7 @@ export function TrackMapEditor({ jcmPath }: Props) {
         canRedo={canRedo}
         onUndo={undo}
         onRedo={redo}
+        onOpenHistory={() => setHistoryOpen(true)}
       />
 
       <div className="flex-1 overflow-y-auto">
@@ -461,6 +515,64 @@ export function TrackMapEditor({ jcmPath }: Props) {
           setDragOver={setDragOver}
         />
       </div>
+
+      <UndoHistoryPanel
+        isOpen={historyOpen}
+        pastCount={editor.past.length}
+        futureCount={editor.future.length}
+        baselineIndex={(() => {
+          if (!editor.baseline || !editor.current) return null;
+          const flat = [...editor.past, editor.current, ...editor.future];
+          const baselineKey = writeTrackMap(editor.baseline.map);
+          for (let i = 0; i < flat.length; i++) {
+            if (writeTrackMap(flat[i]!.map) === baselineKey) return i;
+          }
+          return null;
+        })()}
+        entryLabels={(() => {
+          if (!editor.current) return undefined;
+          const flat = [...editor.past, editor.current, ...editor.future];
+          return flat.map((snap, i) =>
+            i === 0
+              ? "Initial state"
+              : diffTrackMaps(flat[i - 1]!.map, snap.map),
+          );
+        })()}
+        onJumpTo={(idx) => jumpToHistoryIndex(idx)}
+        onClose={() => setHistoryOpen(false)}
+      />
+
+      <SaveConfirmDialog
+        isOpen={saveDialogOpen}
+        title="Save Track Map"
+        subjectName={fileBasename}
+        message={
+          <>
+            Overwrites the existing{" "}
+            <span className="font-mono">.jcm</span> file. Playlists that
+            reference it by filename are unaffected.
+          </>
+        }
+        existingNames={
+          new Set(
+            state.scan.trackMaps.map((t) =>
+              t.filename.replace(/\.jcm$/i, ""),
+            ),
+          )
+        }
+        defaultNewName={suggestDuplicateName(
+          trackMapName,
+          new Set(
+            state.scan.trackMaps.map((t) =>
+              t.filename.replace(/\.jcm$/i, ""),
+            ),
+          ),
+        )}
+        itemKind="track map"
+        onSave={performSave}
+        onSaveAs={performSaveAs}
+        onClose={() => setSaveDialogOpen(false)}
+      />
     </main>
   );
 }
