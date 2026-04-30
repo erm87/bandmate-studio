@@ -850,7 +850,7 @@ function PlaylistSongList({
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-hidden border-r border-zinc-200 dark:border-zinc-800">
       <header
-        className={`grid ${COLS} shrink-0 items-center gap-2 border-b border-zinc-200 bg-zinc-50 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/50`}
+        className={`grid ${COLS} shrink-0 items-center gap-2 border-b border-zinc-200 bg-zinc-50 px-3 py-1.5 eyebrow dark:border-zinc-800 dark:bg-zinc-900/50`}
       >
         <span className="text-right">#</span>
         <span>Song</span>
@@ -1183,7 +1183,7 @@ function PlaylistDropZoneLabel({
   return (
     <span
       className={cn(
-        "pointer-events-none absolute z-20 inline-flex items-center gap-1 rounded bg-brand-600 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white shadow",
+        "pointer-events-none absolute z-20 inline-flex items-center gap-1 rounded bg-brand-600 px-1.5 py-0.5 text-2xs font-semibold uppercase tracking-wide text-white shadow",
         positionCls,
       )}
     >
@@ -1209,7 +1209,7 @@ function Tag({
   return (
     <span
       className={cn(
-        "shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider",
+        "shrink-0 rounded px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-wider",
         palette,
       )}
     >

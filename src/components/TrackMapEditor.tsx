@@ -612,7 +612,7 @@ function TrackMapList({
   return (
     <>
       <header
-        className={`grid ${COLS} sticky top-0 z-10 items-center gap-2 border-b border-zinc-200 bg-zinc-50 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/80`}
+        className={`grid ${COLS} sticky top-0 z-10 items-center gap-2 border-b border-zinc-200 bg-zinc-50 px-3 py-1.5 eyebrow dark:border-zinc-800 dark:bg-zinc-900/80`}
       >
         <span className="text-right">Ch</span>
         <span>Label</span>
@@ -726,7 +726,7 @@ function TrackMapList({
                 }
                 maxLength={64}
                 spellCheck={false}
-                className="user-text rounded-sm bg-transparent px-1.5 py-0.5 font-mono text-xs text-zinc-700 outline-none placeholder:text-zinc-400 focus:bg-white focus:ring-2 focus:ring-brand-300 dark:text-zinc-200 dark:placeholder:text-zinc-600 dark:focus:bg-zinc-950 dark:focus:ring-brand-700"
+                className="user-text rounded-sm bg-transparent px-1.5 py-0.5 font-mono text-xs text-zinc-700 outline-none placeholder:text-zinc-400 focus:bg-white focus:ring-2 focus:ring-accent-300 dark:text-zinc-200 dark:placeholder:text-zinc-600 dark:focus:bg-zinc-950 dark:focus:ring-accent-700"
               />
 
               <span className="flex items-center justify-end gap-0.5">

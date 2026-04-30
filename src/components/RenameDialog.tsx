@@ -150,7 +150,7 @@ export function RenameDialog({
           </div>
 
           <label className="flex flex-col gap-1">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+            <span className="eyebrow">
               New Name
             </span>
             <input
@@ -164,7 +164,7 @@ export function RenameDialog({
                 "user-text rounded-md border bg-white px-3 py-2 text-sm shadow-sm focus:outline-none focus-visible:ring-2 dark:bg-zinc-950",
                 showValidationError
                   ? "border-red-300 focus-visible:ring-red-400 dark:border-red-700"
-                  : "border-zinc-300 focus-visible:ring-brand-400 dark:border-zinc-700",
+                  : "border-zinc-300 focus-visible:ring-accent-400 dark:border-zinc-700",
               )}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && canSubmit) {
@@ -201,7 +201,7 @@ export function RenameDialog({
             type="button"
             onClick={onClose}
             disabled={submitting}
-            className="rounded-md px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:opacity-50 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            className="rounded-md px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 disabled:opacity-50 dark:text-zinc-300 dark:hover:bg-zinc-800"
           >
             Cancel
           </button>
@@ -210,7 +210,7 @@ export function RenameDialog({
             onClick={handleSubmit}
             disabled={!canSubmit}
             className={cn(
-              "rounded-md px-3 py-1.5 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2",
+              "rounded-md px-3 py-1.5 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2",
               canSubmit
                 ? "bg-brand-500 text-white hover:bg-brand-600"
                 : "cursor-not-allowed bg-zinc-100 text-zinc-400 dark:bg-zinc-800 dark:text-zinc-500",

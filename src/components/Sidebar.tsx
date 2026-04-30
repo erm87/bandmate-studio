@@ -759,7 +759,7 @@ function SectionAction({
       }}
       title={label}
       aria-label={ariaLabel}
-      className="flex h-5 w-5 items-center justify-center rounded text-zinc-500 hover:bg-zinc-200 hover:text-zinc-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+      className="flex h-5 w-5 items-center justify-center rounded text-zinc-500 hover:bg-zinc-200 hover:text-zinc-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
     >
       <PlusIcon className="h-3 w-3" />
     </button>

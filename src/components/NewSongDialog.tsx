@@ -177,7 +177,7 @@ export function NewSongDialog({ isOpen, onClose }: Props) {
         <div className="flex flex-col gap-4 px-5 py-4">
           {/* Name */}
           <label className="flex flex-col gap-1">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+            <span className="eyebrow">
               Name
             </span>
             <input
@@ -192,7 +192,7 @@ export function NewSongDialog({ isOpen, onClose }: Props) {
                 "user-text rounded-md border bg-white px-3 py-2 text-sm shadow-sm focus:outline-none focus-visible:ring-2 dark:bg-zinc-950",
                 showValidationError
                   ? "border-red-300 focus-visible:ring-red-400 dark:border-red-700"
-                  : "border-zinc-300 focus-visible:ring-brand-400 dark:border-zinc-700",
+                  : "border-zinc-300 focus-visible:ring-accent-400 dark:border-zinc-700",
               )}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && canCreate) {
@@ -206,14 +206,14 @@ export function NewSongDialog({ isOpen, onClose }: Props) {
                 {validationError}
               </span>
             )}
-            <span className="text-[11px] text-zinc-500">
+            <span className="text-meta text-zinc-500">
               Becomes the song folder name and the .jcs filename.
             </span>
           </label>
 
           {/* Sample rate */}
           <fieldset className="flex flex-col gap-1">
-            <legend className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+            <legend className="eyebrow">
               Sample Rate
             </legend>
             <div className="inline-flex w-fit overflow-hidden rounded-md border border-zinc-300 dark:border-zinc-700">
@@ -238,7 +238,7 @@ export function NewSongDialog({ isOpen, onClose }: Props) {
 
           {/* Source folder */}
           <div className="flex flex-col gap-1">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+            <span className="eyebrow">
               Source Folder <span className="font-normal text-zinc-400">(optional)</span>
             </span>
             <div className="flex items-stretch gap-2">
@@ -246,7 +246,7 @@ export function NewSongDialog({ isOpen, onClose }: Props) {
                 type="button"
                 onClick={handlePickSourceFolder}
                 disabled={creating}
-                className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-xs font-medium text-zinc-700 shadow-sm hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-900"
+                className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-xs font-medium text-zinc-700 shadow-sm hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-900"
               >
                 {sourceFolder ? "Change…" : "Choose folder…"}
               </button>
@@ -257,7 +257,7 @@ export function NewSongDialog({ isOpen, onClose }: Props) {
                 {sourceFolder ?? "No source folder selected"}
               </span>
             </div>
-            <span className="text-[11px] text-zinc-500">
+            <span className="text-meta text-zinc-500">
               Where your unimported WAVs live (e.g., a Logic export folder).
               Files appear in the song editor's source pane and copy
               into the song folder when you save.
@@ -279,7 +279,7 @@ export function NewSongDialog({ isOpen, onClose }: Props) {
             type="button"
             onClick={onClose}
             disabled={creating}
-            className="rounded-md px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:opacity-50 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            className="rounded-md px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 disabled:opacity-50 dark:text-zinc-300 dark:hover:bg-zinc-800"
           >
             Cancel
           </button>
@@ -288,7 +288,7 @@ export function NewSongDialog({ isOpen, onClose }: Props) {
             onClick={handleCreate}
             disabled={!canCreate}
             className={cn(
-              "rounded-md px-3 py-1.5 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2",
+              "rounded-md px-3 py-1.5 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2",
               canCreate
                 ? "bg-brand-500 text-white hover:bg-brand-600"
                 : "cursor-not-allowed bg-zinc-100 text-zinc-400 dark:bg-zinc-800 dark:text-zinc-500",

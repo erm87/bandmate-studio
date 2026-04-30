@@ -298,7 +298,7 @@ export function ChannelGrid({
   return (
     <div className="flex min-w-0 flex-1 flex-col overflow-hidden border-r border-zinc-200 dark:border-zinc-800">
       <header
-        className={`grid ${COLS} shrink-0 items-center gap-2 border-b border-zinc-200 bg-zinc-50 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wider text-zinc-500 dark:border-zinc-800 dark:bg-zinc-900/50`}
+        className={`grid ${COLS} shrink-0 items-center gap-2 border-b border-zinc-200 bg-zinc-50 px-3 py-1.5 eyebrow dark:border-zinc-800 dark:bg-zinc-900/50`}
       >
         <span className="text-right">Ch</span>
         <span>Label</span>
@@ -713,7 +713,7 @@ function DropZoneLabel({
     return (
       <span
         className={cn(
-          "pointer-events-none absolute z-20 inline-flex items-center gap-1 rounded bg-red-600 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white shadow",
+          "pointer-events-none absolute z-20 inline-flex items-center gap-1 rounded bg-red-600 px-1.5 py-0.5 text-2xs font-semibold uppercase tracking-wide text-white shadow",
           positionCls,
         )}
       >
@@ -725,7 +725,7 @@ function DropZoneLabel({
   if (mode === "replace") {
     return (
       <span
-        className="pointer-events-none absolute left-2 top-1/2 z-20 inline-flex -translate-y-1/2 items-center gap-1 rounded bg-brand-600 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white shadow"
+        className="pointer-events-none absolute left-2 top-1/2 z-20 inline-flex -translate-y-1/2 items-center gap-1 rounded bg-brand-600 px-1.5 py-0.5 text-2xs font-semibold uppercase tracking-wide text-white shadow"
       >
         Replace
       </span>
@@ -743,7 +743,7 @@ function DropZoneLabel({
   return (
     <span
       className={cn(
-        "pointer-events-none absolute z-20 inline-flex items-center gap-1 rounded bg-brand-600 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white shadow",
+        "pointer-events-none absolute z-20 inline-flex items-center gap-1 rounded bg-brand-600 px-1.5 py-0.5 text-2xs font-semibold uppercase tracking-wide text-white shadow",
         positionCls,
       )}
     >
@@ -941,7 +941,7 @@ function MidiCleanBadge({
   if (cleanState === true) {
     return (
       <span
-        className="shrink-0 rounded bg-emerald-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300"
+        className="shrink-0 rounded bg-emerald-100 px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-wider text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300"
         title="Contains only events that should reach a downstream device. Safe to send to BandMate."
       >
         Clean
@@ -958,7 +958,7 @@ function MidiCleanBadge({
           ? "Cleaning…"
           : "Contains meta events (markers, key sigs, etc.) that may cause spurious patch changes on a live MIDI port. Click to clean in place."
       }
-      className="shrink-0 cursor-pointer rounded bg-amber-100 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-amber-700 transition hover:bg-amber-200 disabled:cursor-wait disabled:opacity-60 dark:bg-amber-950/40 dark:text-amber-300 dark:hover:bg-amber-900/60"
+      className="shrink-0 cursor-pointer rounded bg-amber-100 px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-wider text-amber-700 transition hover:bg-amber-200 disabled:cursor-wait disabled:opacity-60 dark:bg-amber-950/40 dark:text-amber-300 dark:hover:bg-amber-900/60"
     >
       {cleaning ? "Cleaning…" : "Not clean"}
     </button>
@@ -1044,7 +1044,7 @@ function MidiRow({
       {isDragOver && (
         <DropZoneLabel mode={dragMode} blocked={dragBlocked} />
       )}
-      <span className="text-right font-mono text-[10px] uppercase tabular-nums text-green-700 dark:text-green-500">
+      <span className="text-right font-mono text-2xs uppercase tabular-nums text-green-700 dark:text-green-500">
         MID
       </span>
       <span

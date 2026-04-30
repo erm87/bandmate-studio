@@ -40,11 +40,11 @@ export function AvailableSongsPane({ allSongs, inPlaylist, onAdd }: Props) {
           <h2 className="text-xs font-semibold uppercase tracking-wider text-zinc-500">
             Available Songs
           </h2>
-          <span className="rounded-full bg-zinc-200 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600 dark:bg-zinc-900 dark:text-zinc-400">
+          <span className="rounded-full bg-zinc-200 px-1.5 py-0.5 text-2xs font-medium text-zinc-600 dark:bg-zinc-900 dark:text-zinc-400">
             {available.length}
           </span>
         </div>
-        <p className="text-[11px] leading-snug text-zinc-500 dark:text-zinc-400">
+        <p className="text-meta leading-snug text-zinc-500 dark:text-zinc-400">
           Songs in your working folder that aren't in this playlist yet. Click
           one to append it to the end.
         </p>

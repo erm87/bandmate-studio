@@ -156,7 +156,7 @@ export function NewTrackMapDialog({ isOpen, onClose }: Props) {
         <div className="flex flex-col gap-4 px-5 py-4">
           {/* Name */}
           <label className="flex flex-col gap-1">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+            <span className="eyebrow">
               Name
             </span>
             <input
@@ -171,7 +171,7 @@ export function NewTrackMapDialog({ isOpen, onClose }: Props) {
                 "user-text rounded-md border bg-white px-3 py-2 text-sm shadow-sm focus:outline-none focus-visible:ring-2 dark:bg-zinc-950",
                 showValidationError
                   ? "border-red-300 focus-visible:ring-red-400 dark:border-red-700"
-                  : "border-zinc-300 focus-visible:ring-brand-400 dark:border-zinc-700",
+                  : "border-zinc-300 focus-visible:ring-accent-400 dark:border-zinc-700",
               )}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && canCreate) {
@@ -185,7 +185,7 @@ export function NewTrackMapDialog({ isOpen, onClose }: Props) {
                 {validationError}
               </span>
             )}
-            <span className="text-[11px] text-zinc-500">
+            <span className="text-meta text-zinc-500">
               Becomes the .jcm filename. The BandMate references this from a
               playlist's <span className="font-mono">&lt;trackmap&gt;</span> tag.
             </span>
@@ -193,7 +193,7 @@ export function NewTrackMapDialog({ isOpen, onClose }: Props) {
 
           {/* Template */}
           <fieldset className="flex flex-col gap-2">
-            <legend className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+            <legend className="eyebrow">
               Template
             </legend>
             <div className="flex flex-col gap-1.5">
@@ -226,7 +226,7 @@ export function NewTrackMapDialog({ isOpen, onClose }: Props) {
             type="button"
             onClick={onClose}
             disabled={creating}
-            className="rounded-md px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:opacity-50 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            className="rounded-md px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 disabled:opacity-50 dark:text-zinc-300 dark:hover:bg-zinc-800"
           >
             Cancel
           </button>
@@ -235,7 +235,7 @@ export function NewTrackMapDialog({ isOpen, onClose }: Props) {
             onClick={handleCreate}
             disabled={!canCreate}
             className={cn(
-              "rounded-md px-3 py-1.5 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2",
+              "rounded-md px-3 py-1.5 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2",
               canCreate
                 ? "bg-brand-500 text-white hover:bg-brand-600"
                 : "cursor-not-allowed bg-zinc-100 text-zinc-400 dark:bg-zinc-800 dark:text-zinc-500",
@@ -272,7 +272,7 @@ function TemplateRadio({
       onClick={onSelect}
       disabled={disabled}
       className={cn(
-        "flex w-full items-start gap-3 rounded-md border px-3 py-2 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:opacity-50",
+        "flex w-full items-start gap-3 rounded-md border px-3 py-2 text-left transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 disabled:opacity-50",
         isSelected
           ? "border-brand-500 bg-brand-50 dark:border-brand-400 dark:bg-brand-950/30"
           : "border-zinc-200 bg-white hover:border-zinc-300 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:hover:border-zinc-700 dark:hover:bg-zinc-900",
@@ -302,7 +302,7 @@ function TemplateRadio({
         >
           {label}
         </span>
-        <span className="mt-0.5 text-[11px] leading-snug text-zinc-500 dark:text-zinc-400">
+        <span className="mt-0.5 text-meta leading-snug text-zinc-500 dark:text-zinc-400">
           {description}
         </span>
       </span>
