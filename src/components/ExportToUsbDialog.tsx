@@ -215,7 +215,7 @@ export function ExportToUsbDialog({ isOpen, onClose }: Props) {
             <button
               type="button"
               onClick={onClose}
-              className="rounded-md px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              className="rounded-md px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 dark:text-zinc-300 dark:hover:bg-zinc-800"
             >
               {step === "error" ? "Close" : "Cancel"}
             </button>
@@ -245,7 +245,7 @@ function PickStep({
       </p>
       <div className="rounded-md bg-zinc-50 px-3 py-2 text-xs text-zinc-600 dark:bg-zinc-950 dark:text-zinc-400">
         <div>
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+          <span className="eyebrow">
             Source
           </span>
           <p className="user-text font-mono">
@@ -258,7 +258,7 @@ function PickStep({
         onClick={onPick}
         disabled={!workingFolder}
         className={cn(
-          "rounded-md px-3 py-2 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400",
+          "rounded-md px-3 py-2 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400",
           workingFolder
             ? "bg-brand-500 text-white hover:bg-brand-600"
             : "cursor-not-allowed bg-zinc-100 text-zinc-400 dark:bg-zinc-800 dark:text-zinc-500",
@@ -289,14 +289,14 @@ function ConfirmStep({
     <>
       <div className="rounded-md bg-zinc-50 px-3 py-2 text-xs text-zinc-600 dark:bg-zinc-950 dark:text-zinc-400">
         <div className="mb-2">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+          <span className="eyebrow">
             Source
           </span>
           <p className="user-text font-mono">{workingFolder}</p>
         </div>
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0 flex-1">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+            <span className="eyebrow">
               Destination
             </span>
             <p className="user-text truncate font-mono">{destPath}</p>
@@ -304,7 +304,7 @@ function ConfirmStep({
           <button
             type="button"
             onClick={onChangeDest}
-            className="shrink-0 self-end rounded-md border border-zinc-200 bg-white px-2 py-1 text-[11px] font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            className="shrink-0 self-end rounded-md border border-zinc-200 bg-white px-2 py-1 text-meta font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
           >
             Change
           </button>
@@ -314,7 +314,7 @@ function ConfirmStep({
       {/* Pre-export findings. The export proceeds even with warnings —
           the user has explicit awareness via this section. */}
       {validating && (
-        <p className="text-[11px] italic text-zinc-500 dark:text-zinc-400">
+        <p className="text-meta italic text-zinc-500 dark:text-zinc-400">
           Checking references…
         </p>
       )}
@@ -329,7 +329,7 @@ function ConfirmStep({
               <li key={i}>
                 <span className="user-text">{f.message}</span>
                 {f.detail && (
-                  <span className="user-text block pl-3 text-[11px] opacity-80">
+                  <span className="user-text block pl-3 text-meta opacity-80">
                     {f.detail}
                   </span>
                 )}
@@ -344,7 +344,7 @@ function ConfirmStep({
         </p>
       )}
 
-      <p className="text-[11px] leading-snug text-zinc-500 dark:text-zinc-400">
+      <p className="text-meta leading-snug text-zinc-500 dark:text-zinc-400">
         Files in <span className="font-mono">bm_media/</span> on the working
         folder will be copied to{" "}
         <span className="font-mono">bm_media/</span> on the destination.
@@ -356,7 +356,7 @@ function ConfirmStep({
       <button
         type="button"
         onClick={onStart}
-        className="rounded-md bg-brand-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2"
+        className="rounded-md bg-brand-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2"
       >
         Start export
       </button>
@@ -395,7 +395,7 @@ function CopyingStep({
             style={{ width: `${pct}%` }}
           />
         </div>
-        <div className="flex justify-between text-[11px] tabular-nums text-zinc-500 dark:text-zinc-400">
+        <div className="flex justify-between text-meta tabular-nums text-zinc-500 dark:text-zinc-400">
           <span>
             {filesCopied} / {totalFiles} files
           </span>
@@ -406,13 +406,13 @@ function CopyingStep({
       </div>
       {progress?.currentFile && (
         <p
-          className="user-text truncate font-mono text-[11px] text-zinc-500"
+          className="user-text truncate font-mono text-meta text-zinc-500"
           title={progress.currentFile}
         >
           {progress.currentFile}
         </p>
       )}
-      <p className="text-[11px] leading-snug text-zinc-500 dark:text-zinc-400">
+      <p className="text-meta leading-snug text-zinc-500 dark:text-zinc-400">
         Don't unplug the drive. The dialog will update when the copy finishes
         and macOS metadata cleanup runs.
       </p>
@@ -456,7 +456,7 @@ function DoneStep({
         <button
           type="button"
           onClick={onClose}
-          className="rounded-md px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          className="rounded-md px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 dark:text-zinc-300 dark:hover:bg-zinc-800"
         >
           Done
         </button>
@@ -464,7 +464,7 @@ function DoneStep({
           type="button"
           onClick={onEject}
           disabled={ejecting}
-          className="rounded-md bg-brand-500 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2 disabled:opacity-50"
+          className="rounded-md bg-brand-500 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2 disabled:opacity-50"
         >
           {ejecting ? "Ejecting…" : "Eject drive"}
         </button>
@@ -491,14 +491,14 @@ function ErrorStep({
         <button
           type="button"
           onClick={onClose}
-          className="rounded-md px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          className="rounded-md px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 dark:text-zinc-300 dark:hover:bg-zinc-800"
         >
           Close
         </button>
         <button
           type="button"
           onClick={onRetry}
-          className="rounded-md bg-brand-500 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2"
+          className="rounded-md bg-brand-500 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2"
         >
           Retry
         </button>

@@ -92,7 +92,7 @@ export function WorkingFolderBar() {
           onClick={() => {
             void chooseWorkingFolder();
           }}
-          className="rounded-md border border-zinc-200 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-900 dark:focus-visible:ring-offset-zinc-950"
+          className="rounded-md border border-zinc-200 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-900 dark:focus-visible:ring-offset-zinc-950"
         >
           Change
         </button>
@@ -101,7 +101,7 @@ export function WorkingFolderBar() {
           onClick={() => setExportOpen(true)}
           disabled={isLoading}
           title="Copy bm_media/ onto a USB stick"
-          className="rounded-md bg-brand-500 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2 disabled:opacity-50 dark:focus-visible:ring-offset-zinc-950"
+          className="rounded-md bg-brand-500 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2 disabled:opacity-50 dark:focus-visible:ring-offset-zinc-950"
         >
           Export to USB
         </button>
@@ -152,7 +152,7 @@ function WorkingFolderChip({
       title={path}
       onContextMenu={onContextMenu}
     >
-      <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider text-zinc-500 dark:text-zinc-500">
+      <span className="shrink-0 eyebrow dark:text-zinc-500">
         Working Folder
       </span>
       <span
@@ -185,7 +185,7 @@ function IconButton({
       disabled={disabled}
       title={title}
       aria-label={title}
-      className="flex h-[30px] w-[30px] items-center justify-center rounded-md text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent dark:text-zinc-500 dark:hover:bg-zinc-900 dark:hover:text-zinc-300 dark:focus-visible:ring-offset-zinc-950"
+      className="flex h-[30px] w-[30px] items-center justify-center rounded-md text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent dark:text-zinc-500 dark:hover:bg-zinc-900 dark:hover:text-zinc-300 dark:focus-visible:ring-offset-zinc-950"
     >
       {children}
     </button>

@@ -54,7 +54,7 @@ export function EmptyState() {
               void chooseWorkingFolder();
             }}
             disabled={isLoading}
-            className="w-full rounded-lg bg-brand-500 px-4 py-3 font-medium text-white shadow-sm transition hover:bg-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2 disabled:opacity-50 dark:focus-visible:ring-offset-zinc-950"
+            className="w-full rounded-lg bg-brand-500 px-4 py-3 font-medium text-white shadow-sm transition hover:bg-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2 disabled:opacity-50 dark:focus-visible:ring-offset-zinc-950"
           >
             {isLoading ? "Loading…" : "Choose Working Folder"}
           </button>

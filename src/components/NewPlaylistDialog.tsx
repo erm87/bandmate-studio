@@ -163,7 +163,7 @@ export function NewPlaylistDialog({ isOpen, onClose }: Props) {
         <div className="flex flex-col gap-4 px-5 py-4">
           {/* Name */}
           <label className="flex flex-col gap-1">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+            <span className="eyebrow">
               Name
             </span>
             <input
@@ -178,7 +178,7 @@ export function NewPlaylistDialog({ isOpen, onClose }: Props) {
                 "user-text rounded-md border bg-white px-3 py-2 text-sm shadow-sm focus:outline-none focus-visible:ring-2 dark:bg-zinc-950",
                 showValidationError
                   ? "border-red-300 focus-visible:ring-red-400 dark:border-red-700"
-                  : "border-zinc-300 focus-visible:ring-brand-400 dark:border-zinc-700",
+                  : "border-zinc-300 focus-visible:ring-accent-400 dark:border-zinc-700",
               )}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && canCreate) {
@@ -192,7 +192,7 @@ export function NewPlaylistDialog({ isOpen, onClose }: Props) {
                 {validationError}
               </span>
             )}
-            <span className="text-[11px] text-zinc-500">
+            <span className="text-meta text-zinc-500">
               Becomes the .jcp filename and the playlist's display name on
               the BandMate.
             </span>
@@ -200,7 +200,7 @@ export function NewPlaylistDialog({ isOpen, onClose }: Props) {
 
           {/* Sample rate */}
           <fieldset className="flex flex-col gap-1">
-            <legend className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+            <legend className="eyebrow">
               Sample Rate
             </legend>
             <div className="inline-flex w-fit overflow-hidden rounded-md border border-zinc-300 dark:border-zinc-700">
@@ -221,7 +221,7 @@ export function NewPlaylistDialog({ isOpen, onClose }: Props) {
                 disabled={creating}
               />
             </div>
-            <span className="text-[11px] text-zinc-500">
+            <span className="text-meta text-zinc-500">
               Every song in the playlist must use this rate. Mismatched songs
               are flagged in the editor.
             </span>
@@ -229,14 +229,14 @@ export function NewPlaylistDialog({ isOpen, onClose }: Props) {
 
           {/* Track map */}
           <label className="flex flex-col gap-1">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+            <span className="eyebrow">
               Track Map
             </span>
             <select
               value={trackMapPath}
               onChange={(e) => setTrackMapPath(e.target.value)}
               disabled={creating || noTrackMaps}
-              className="user-text rounded-md border border-zinc-300 bg-white px-3 py-2 font-mono text-sm text-zinc-700 shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-300"
+              className="user-text rounded-md border border-zinc-300 bg-white px-3 py-2 font-mono text-sm text-zinc-700 shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-300"
             >
               {noTrackMaps && <option value="">(no track maps available)</option>}
               {state.scan.trackMaps.map((tm) => (
@@ -246,12 +246,12 @@ export function NewPlaylistDialog({ isOpen, onClose }: Props) {
               ))}
             </select>
             {noTrackMaps ? (
-              <span className="text-[11px] text-amber-700 dark:text-amber-400">
+              <span className="text-meta text-amber-700 dark:text-amber-400">
                 No track maps in the working folder yet — create one in the
                 Track Maps section first.
               </span>
             ) : (
-              <span className="text-[11px] text-zinc-500">
+              <span className="text-meta text-zinc-500">
                 Names the 25 output channels. The BandMate uses this on the
                 playlist's home screen.
               </span>
@@ -273,7 +273,7 @@ export function NewPlaylistDialog({ isOpen, onClose }: Props) {
             type="button"
             onClick={onClose}
             disabled={creating}
-            className="rounded-md px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:opacity-50 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            className="rounded-md px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 disabled:opacity-50 dark:text-zinc-300 dark:hover:bg-zinc-800"
           >
             Cancel
           </button>
@@ -282,7 +282,7 @@ export function NewPlaylistDialog({ isOpen, onClose }: Props) {
             onClick={handleCreate}
             disabled={!canCreate}
             className={cn(
-              "rounded-md px-3 py-1.5 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2",
+              "rounded-md px-3 py-1.5 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2",
               canCreate
                 ? "bg-brand-500 text-white hover:bg-brand-600"
                 : "cursor-not-allowed bg-zinc-100 text-zinc-400 dark:bg-zinc-800 dark:text-zinc-500",

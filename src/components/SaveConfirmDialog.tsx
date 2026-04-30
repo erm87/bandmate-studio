@@ -177,13 +177,13 @@ export function SaveConfirmDialog({
             Save changes to{" "}
             <span className="user-text font-mono">"{subjectName}"</span>?
           </p>
-          <div className="text-[12px] leading-snug text-zinc-500 dark:text-zinc-400">
+          <div className="text-xs leading-snug text-zinc-500 dark:text-zinc-400">
             {message}
           </div>
 
           <div className="mt-1 flex flex-col gap-1 border-t border-zinc-200 pt-3 dark:border-zinc-800">
             <label className="flex flex-col gap-1">
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+              <span className="eyebrow">
                 Or save as a new {itemKind}
               </span>
               <input
@@ -198,7 +198,7 @@ export function SaveConfirmDialog({
                   "user-text rounded-md border bg-white px-3 py-1.5 font-mono text-xs text-zinc-700 shadow-sm focus:outline-none focus-visible:ring-2 dark:bg-zinc-950 dark:text-zinc-300",
                   validationError
                     ? "border-red-300 focus-visible:ring-red-400 dark:border-red-700"
-                    : "border-zinc-300 focus-visible:ring-brand-400 dark:border-zinc-700",
+                    : "border-zinc-300 focus-visible:ring-accent-400 dark:border-zinc-700",
                 )}
                 onKeyDown={(e) => {
                   if (e.key === "Enter" && canSaveAs) {
@@ -208,12 +208,12 @@ export function SaveConfirmDialog({
                 }}
               />
               {validationError && (
-                <span className="text-[11px] text-red-600 dark:text-red-400">
+                <span className="text-meta text-red-600 dark:text-red-400">
                   {validationError}
                 </span>
               )}
               {!validationError && (
-                <span className="text-[11px] text-zinc-500 dark:text-zinc-500">
+                <span className="text-meta text-zinc-500 dark:text-zinc-500">
                   Leaves the original {itemKind} untouched and switches to
                   the new copy.
                 </span>
@@ -236,7 +236,7 @@ export function SaveConfirmDialog({
             type="button"
             onClick={onClose}
             disabled={busy !== null}
-            className="rounded-md px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 disabled:opacity-50 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            className="rounded-md px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 disabled:opacity-50 dark:text-zinc-300 dark:hover:bg-zinc-800"
           >
             Cancel
           </button>
@@ -245,7 +245,7 @@ export function SaveConfirmDialog({
             onClick={handleSaveAs}
             disabled={!canSaveAs}
             className={cn(
-              "rounded-md border px-3 py-1.5 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2",
+              "rounded-md border px-3 py-1.5 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2",
               canSaveAs
                 ? "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
                 : "cursor-not-allowed border-zinc-200 bg-zinc-50 text-zinc-400 dark:border-zinc-800 dark:bg-zinc-900/40 dark:text-zinc-600",
@@ -258,7 +258,7 @@ export function SaveConfirmDialog({
             onClick={handleSave}
             disabled={!canSave}
             className={cn(
-              "rounded-md px-3 py-1.5 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2",
+              "rounded-md px-3 py-1.5 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2",
               canSave
                 ? "bg-brand-500 text-white hover:bg-brand-600"
                 : "cursor-not-allowed bg-zinc-100 text-zinc-400 dark:bg-zinc-800 dark:text-zinc-500",

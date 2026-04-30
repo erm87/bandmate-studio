@@ -142,7 +142,7 @@ export function UndoHistoryPanel({
                   <span className="flex min-w-0 flex-1 items-center gap-2">
                     <span
                       className={cn(
-                        "shrink-0 font-mono text-[10px] tabular-nums",
+                        "shrink-0 font-mono text-2xs tabular-nums",
                         isCurrent
                           ? "text-brand-700 dark:text-brand-300"
                           : "text-zinc-400 dark:text-zinc-600",
@@ -163,12 +163,12 @@ export function UndoHistoryPanel({
                   </span>
                   <span className="flex shrink-0 items-center gap-1.5">
                     {isCurrent && (
-                      <span className="rounded bg-brand-500 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-white">
+                      <span className="rounded bg-brand-500 px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-wider text-white">
                         Current
                       </span>
                     )}
                     {isBaseline && (
-                      <span className="rounded bg-emerald-500 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-white">
+                      <span className="rounded bg-emerald-500 px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-wider text-white">
                         Saved
                       </span>
                     )}
@@ -179,7 +179,7 @@ export function UndoHistoryPanel({
           })}
         </ul>
 
-        <footer className="shrink-0 border-t border-zinc-200 px-5 py-2 text-[11px] text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
+        <footer className="shrink-0 border-t border-zinc-200 px-5 py-2 text-meta text-zinc-500 dark:border-zinc-800 dark:text-zinc-400">
           {total === 1
             ? "Nothing to undo yet."
             : `${total} snapshots. Click any entry to jump there. ⌘Z / ⇧⌘Z still work.`}

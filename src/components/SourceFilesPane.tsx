@@ -219,7 +219,7 @@ function TabButton({
       onClick={onClick}
       title={title}
       className={cn(
-        "relative flex flex-1 items-center justify-center border-b-2 px-3 py-2 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-400",
+        "relative flex flex-1 items-center justify-center border-b-2 px-3 py-2 text-xs font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-accent-400",
         isActive
           ? "border-brand-500 text-zinc-900 dark:text-zinc-100"
           : "border-transparent text-zinc-500 hover:text-zinc-800 dark:text-zinc-500 dark:hover:text-zinc-300",
@@ -291,7 +291,7 @@ function FolderView({
       <div className="flex shrink-0 flex-col gap-1.5 border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-800">
         <div className="flex items-start justify-between gap-2">
           <p
-            className="user-text min-w-0 flex-1 cursor-context-menu truncate self-center font-mono text-[10px] text-zinc-500"
+            className="user-text min-w-0 flex-1 cursor-context-menu truncate self-center font-mono text-2xs text-zinc-500"
             title={folder}
             onContextMenu={(e) => {
               e.preventDefault();
@@ -310,7 +310,7 @@ function FolderView({
           </p>
           {headerAction && <div className="shrink-0">{headerAction}</div>}
         </div>
-        <p className="text-[11px] leading-snug text-zinc-500 dark:text-zinc-400">
+        <p className="text-meta leading-snug text-zinc-500 dark:text-zinc-400">
           {helper}
         </p>
       </div>
@@ -419,7 +419,7 @@ function SourceFolderEmptyState({ onPick }: { onPick: () => void }) {
       <button
         type="button"
         onClick={onPick}
-        className="rounded-md bg-brand-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-brand-400 focus-visible:ring-offset-2"
+        className="rounded-md bg-brand-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2"
       >
         Choose folder…
       </button>
@@ -463,10 +463,10 @@ function Section({
   return (
     <section className="border-b border-zinc-200 last:border-b-0 dark:border-zinc-800">
       <header className="flex items-center justify-between px-4 pt-3 pb-1.5">
-        <h3 className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500">
+        <h3 className="eyebrow">
           {title}
         </h3>
-        <span className="rounded-full bg-zinc-200 px-1.5 py-0.5 text-[10px] font-medium text-zinc-600 dark:bg-zinc-900 dark:text-zinc-400">
+        <span className="rounded-full bg-zinc-200 px-1.5 py-0.5 text-2xs font-medium text-zinc-600 dark:bg-zinc-900 dark:text-zinc-400">
           {count}
         </span>
       </header>
@@ -592,7 +592,7 @@ function SourceFileRow({
           </p>
           <p
             className={cn(
-              "truncate text-[10px]",
+              "truncate text-2xs",
               errorReason === "rate"
                 ? "text-red-600 dark:text-red-400"
                 : "text-zinc-500",
@@ -644,7 +644,7 @@ function Tag({
   return (
     <span
       className={cn(
-        "shrink-0 rounded px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider",
+        "shrink-0 rounded px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-wider",
         palette,
       )}
     >

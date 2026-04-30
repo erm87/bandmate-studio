@@ -2,6 +2,22 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer components {
+  /**
+   * Eyebrow label — the small uppercase caption used above form
+   * fields, in field-set legends, on the working-folder chip, etc.
+   * Collapses the most-repeated 5-class combo
+   * (text-2xs + font-semibold + uppercase + tracking-wider + text-zinc-500)
+   * into one semantic class. 22+ usages across the codebase.
+   *
+   * Color is the same in both light and dark — zinc-500 sits between
+   * the two ends of the gray ramp and reads correctly on either bg.
+   */
+  .eyebrow {
+    @apply text-2xs font-semibold uppercase tracking-wider text-zinc-500;
+  }
+}
+
 /* Tauri webview tweaks: disable text selection on chrome elements,
    keep it on user content. */
 :root {
