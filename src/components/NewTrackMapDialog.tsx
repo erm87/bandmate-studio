@@ -36,15 +36,29 @@ const TEMPLATE_LABELS: Record<TrackMapTemplate, string> = {
   empty: "Empty",
   default: "Default",
   stems: "Stems",
-  brigades: "Brigades-style",
+  modernPlayback: "Modern Playback",
 };
 
 const TEMPLATE_OPTIONS: TrackMapTemplate[] = [
   "empty",
   "default",
   "stems",
-  "brigades",
+  "modernPlayback",
 ];
+
+/**
+ * Resolve the user-typed name to the actual filename basename. We
+ * always append `_tm` if absent because BandMate's convention (and
+ * BM Loader's bundled templates) is `<name>_tm.jcm`. Matching the
+ * convention guards against any hardware-side fallback that might
+ * key off the suffix, and keeps Studio-created files visually
+ * grouped with Loader-created ones in the trackmaps folder.
+ */
+function resolveTrackMapBasename(typedName: string): string {
+  const trimmed = typedName.trim();
+  if (trimmed.toLowerCase().endsWith("_tm")) return trimmed;
+  return `${trimmed}_tm`;
+}
 
 /** Mirrors the Rust validator in `create_track_map`. */
 function validateName(
@@ -58,8 +72,12 @@ function validateName(
   if (trimmed.includes("/") || trimmed.includes("\\")) {
     return "Name cannot contain '/' or '\\'.";
   }
-  if (existingFilenames.has(`${trimmed}.jcm`)) {
-    return `A track map named "${trimmed}" already exists.`;
+  // Collision check runs against the RESOLVED filename (auto-appended
+  // `_tm`) so that typing "foo" and "foo_tm" both surface a conflict
+  // when `foo_tm.jcm` already exists.
+  const resolved = resolveTrackMapBasename(trimmed);
+  if (existingFilenames.has(`${resolved}.jcm`)) {
+    return `A track map named "${resolved}" already exists.`;
   }
   return null;
 }
@@ -83,6 +101,11 @@ export function NewTrackMapDialog({ isOpen, onClose }: Props) {
       requestAnimationFrame(() => inputRef.current?.focus());
     }
   }, [isOpen]);
+
+  // Final filename basename (auto-appended `_tm` if missing). Surfaced
+  // to the user as a helper line under the input so they see what
+  // they're about to get before clicking Create.
+  const resolvedBasename = resolveTrackMapBasename(name);
 
   useEffect(() => {
     if (!isOpen) return;
@@ -111,8 +134,13 @@ export function NewTrackMapDialog({ isOpen, onClose }: Props) {
     setCreating(true);
     setCreateError(null);
     try {
-      // 1. Reserve the .jcm filename.
-      const created = await createTrackMap(state.workingFolder, name.trim());
+      // 1. Reserve the .jcm filename — pass the resolved basename
+      //    (with auto-appended `_tm`) so the on-disk file uses the
+      //    BandMate convention.
+      const created = await createTrackMap(
+        state.workingFolder,
+        resolveTrackMapBasename(name),
+      );
       // 2. Write the template via the codec.
       const map = createEmptyTrackMap(template);
       await writeTextFile(created.jcmPath, writeTrackMap(map));
@@ -164,7 +192,7 @@ export function NewTrackMapDialog({ isOpen, onClose }: Props) {
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
-              placeholder="brigades_tm"
+              placeholder="Name your track map…"
               maxLength={64}
               disabled={creating}
               className={cn(
@@ -188,6 +216,13 @@ export function NewTrackMapDialog({ isOpen, onClose }: Props) {
             <span className="text-meta text-zinc-500">
               Becomes the .jcm filename. The BandMate references this from a
               playlist's <span className="font-mono">&lt;trackmap&gt;</span> tag.
+              {name.trim().length > 0 && (
+                <>
+                  {" "}
+                  File will be saved as{" "}
+                  <span className="font-mono">{resolvedBasename}.jcm</span>.
+                </>
+              )}
             </span>
           </label>
 

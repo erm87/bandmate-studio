@@ -57,23 +57,26 @@ describe("parseTrackMap", () => {
 });
 
 describe("writeTrackMap", () => {
-  it("writes CRLF separators with exactly 25 fields", () => {
+  // Modern BM Loader (audited 2026-05-11) writes LF separators with
+  // a trailing newline. Our writer matches that convention. The
+  // bundled stock fixtures (default_tm.jcm, stems_tm.jcm) use the
+  // older CRLF-without-trailing-newline convention — they're tested
+  // for PARSE compatibility below, not byte-equality on write.
+  it("writes LF separators with exactly 25 fields and a trailing newline", () => {
     const out = writeTrackMap({
       channels: ["A", "B", "C"].concat(Array(22).fill("")),
     });
-    expect(out.startsWith("A\r\nB\r\nC")).toBe(true);
-    // Joining 25 entries with CRLF produces exactly 24 CRLFs.
-    expect(out.split("\r\n").length).toBe(TRACK_MAP_CHANNEL_COUNT);
-    expect((out.match(/\r\n/g) ?? []).length).toBe(TRACK_MAP_CHANNEL_COUNT - 1);
+    expect(out.startsWith("A\nB\nC")).toBe(true);
+    // 25 channels joined by LF + trailing newline = 25 LFs total.
+    expect((out.match(/\n/g) ?? []).length).toBe(TRACK_MAP_CHANNEL_COUNT);
+    expect(out.endsWith("\n")).toBe(true);
   });
 
-  it("does not append a trailing newline when last channel is non-empty", () => {
-    // Mirrors stock JoeCo default_tm.jcm where channel 25 = "MIDI"
+  it("appends a trailing newline even when last channel is non-empty", () => {
     const out = writeTrackMap({
       channels: Array(24).fill("X").concat(["MIDI"]),
     });
-    expect(out.endsWith("\r\nMIDI")).toBe(true);
-    expect(out.endsWith("\r\n")).toBe(false);
+    expect(out.endsWith("MIDI\n")).toBe(true);
   });
 
   it("rejects non-25-channel input", () => {
@@ -101,9 +104,11 @@ describe("structural round-trip", () => {
     expect(reparsed).toEqual(original);
   });
 
-  it("byte-identical round-trip for stock files (CRLF, no trailing newline)", () => {
-    const raw = fx("default_tm.jcm");
-    const written = writeTrackMap(parseTrackMap(raw));
-    expect(written).toBe(raw);
-  });
+  // Note: there's no "byte-identical round-trip for stock fixtures"
+  // test anymore. Our writer (LF + trailing newline) does NOT produce
+  // the same bytes as the bundled stock fixtures (CRLF, no trailing
+  // newline) — by design. Structural round-trip above still proves
+  // semantic preservation. Byte-equality against modern BM Loader
+  // user-created trackmaps is exercised by the smoke-test diff (see
+  // docs/SMOKE-TEST.md §8).
 });

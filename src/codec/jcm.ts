@@ -2,12 +2,25 @@
  * `.jcm` track-map codec.
  *
  * On-disk format: plain text, one channel label per line, 25 lines total
- * (24 audio + 1 MIDI). Unused channels are empty lines. Stock JoeCo files
- * use CRLF without trailing newline; user-edited files (Eric's
- * erictest_tm.jcm) use LF with trailing newline. Our reader accepts either;
- * our writer emits CRLF without trailing newline (matches stock).
+ * (24 audio + 1 MIDI). Unused channels are empty lines.
  *
- * See SPEC.md for the byte-level format reference.
+ * Line-ending convention (audited 2026-05-11 against modern BM Loader
+ * output, smoke-test finding F-3):
+ *   - Our reader accepts CRLF, LF, or mixed — be liberal.
+ *   - Our writer emits LF separators WITH a trailing newline. This
+ *     matches what current BM Loader writes when the user creates a new
+ *     trackmap in its UI.
+ *   - The legacy fixtures in `__fixtures__/` (`default_tm.jcm`,
+ *     `stems_tm.jcm`) use CRLF without trailing newline — they're
+ *     BM Loader's bundled stock templates, written in an older
+ *     convention. Studio's `init_working_folder` seeds these
+ *     byte-for-byte (CRLF), but anything the user CREATES or EDITS
+ *     goes through `writeTrackMap` below and gets the LF convention.
+ *
+ * Both conventions are interchangeable on the wire — the BandMate's
+ * loader is lenient. The dual-convention split is purely about byte-
+ * level parity with the two file sources (bundled stock vs. user-
+ * authored).
  */
 
 import { TRACK_MAP_CHANNEL_COUNT, type TrackMap } from "./types";
@@ -45,9 +58,8 @@ export function parseTrackMap(text: string): TrackMap {
 /**
  * Serialize a `TrackMap` to a `.jcm` string.
  *
- * Uses CRLF separators with no trailing newline (matches stock JoeCo
- * default_tm.jcm / stems_tm.jcm). The BandMate hardware accepts either
- * convention.
+ * Uses LF separators WITH a trailing newline. Matches modern BM Loader
+ * output for user-created trackmaps (smoke-test finding F-3).
  */
 export function writeTrackMap(map: TrackMap): string {
   if (map.channels.length !== TRACK_MAP_CHANNEL_COUNT) {
@@ -55,5 +67,5 @@ export function writeTrackMap(map: TrackMap): string {
       `TrackMap must have exactly ${TRACK_MAP_CHANNEL_COUNT} channels, got ${map.channels.length}`,
     );
   }
-  return map.channels.join("\r\n");
+  return map.channels.join("\n") + "\n";
 }

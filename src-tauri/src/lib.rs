@@ -116,14 +116,45 @@ pub struct ScanResult {
 }
 
 /// Ensure the bm_media/{bm_sources,bm_trackmaps}/ subtree exists under
+/// Stock BM Loader trackmap templates, embedded at compile time
+/// from the codec fixtures. We seed these on fresh `init_working_folder`
+/// because BM Loader does — the BandMate hardware may rely on them as
+/// fallbacks. Byte-for-byte identical to what BM Loader writes
+/// (CRLF separators, no trailing newline, the older bundled convention).
+const SEED_DEFAULT_TM: &[u8] =
+    include_bytes!("../../src/codec/__fixtures__/default_tm.jcm");
+const SEED_STEMS_TM: &[u8] =
+    include_bytes!("../../src/codec/__fixtures__/stems_tm.jcm");
+
 /// `path`. Idempotent — safe to call on an already-initialized folder.
+///
+/// Seeds `default_tm.jcm` and `stems_tm.jcm` into `bm_trackmaps/` if
+/// they're not already present (matches BM Loader's first-run behavior).
+/// Existing files are never overwritten — the user may have edited the
+/// templates and we don't want to silently revert their changes.
 #[tauri::command]
 fn init_working_folder(path: String) -> Result<(), String> {
     let bm_media = Path::new(&path).join("bm_media");
     fs::create_dir_all(bm_media.join("bm_sources"))
         .map_err(|e| format!("Cannot create bm_sources under '{}': {}", path, e))?;
-    fs::create_dir_all(bm_media.join("bm_trackmaps"))
+    let bm_trackmaps = bm_media.join("bm_trackmaps");
+    fs::create_dir_all(&bm_trackmaps)
         .map_err(|e| format!("Cannot create bm_trackmaps under '{}': {}", path, e))?;
+
+    // Seed stock templates. Skip if they exist (idempotent + non-destructive).
+    let default_path = bm_trackmaps.join("default_tm.jcm");
+    if !default_path.exists() {
+        fs::write(&default_path, SEED_DEFAULT_TM).map_err(|e| {
+            format!("Cannot seed default_tm.jcm: {}", e)
+        })?;
+    }
+    let stems_path = bm_trackmaps.join("stems_tm.jcm");
+    if !stems_path.exists() {
+        fs::write(&stems_path, SEED_STEMS_TM).map_err(|e| {
+            format!("Cannot seed stems_tm.jcm: {}", e)
+        })?;
+    }
+
     Ok(())
 }
 
@@ -267,6 +298,16 @@ pub struct AudioFileInfo {
     /// live MIDI port (markers, key sigs, etc — see midi.rs). `None`
     /// for non-MIDI files or for MIDI files we couldn't parse.
     pub is_midi_clean: Option<bool>,
+    /// File duration in seconds — populated for BOTH WAV and MIDI so
+    /// the song-save flow can pick the longest media file across
+    /// kinds. For WAVs this is the same value as `wav_info.duration_seconds`;
+    /// for MIDI it's computed by walking the SMF events + tempo map
+    /// (see `midi::duration_seconds`). `None` if we couldn't probe.
+    ///
+    /// Smoke-test finding F-2: before this field existed, `<length>`
+    /// only considered WAV durations and could under-report when a
+    /// MIDI file was the longest media in a song.
+    pub duration_seconds: Option<f64>,
 }
 
 /// File-level diagnostic. We surface these in the source-files pane.
@@ -339,6 +380,16 @@ fn list_audio_files(folder: String) -> Result<Vec<AudioFileInfo>, String> {
             None
         };
 
+        // Unified duration for both kinds — used by SongEditor's
+        // longest-media calculation that writes `<length>` into
+        // the .jcs. WAV duration comes from the probe; MIDI from
+        // walking the SMF (see midi::duration_seconds).
+        let duration_seconds = match kind {
+            "wav" => wav_info.as_ref().map(|w| w.duration_seconds),
+            "mid" => midi::duration_seconds(&path).ok(),
+            _ => None,
+        };
+
         out.push(AudioFileInfo {
             filename,
             path: path_str,
@@ -346,6 +397,7 @@ fn list_audio_files(folder: String) -> Result<Vec<AudioFileInfo>, String> {
             wav_info,
             diagnostic,
             is_midi_clean,
+            duration_seconds,
         });
     }
 

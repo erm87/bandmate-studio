@@ -75,6 +75,18 @@ export interface AudioFileInfo {
    * Re-computed on every `list_audio_files` call — no persistence.
    */
   isMidiClean: boolean | null;
+  /**
+   * Duration in seconds — populated for BOTH WAV and MIDI. WAV
+   * duration is from the hound header probe (or the lenient fallback).
+   * MIDI duration is computed by walking the SMF events + tempo map
+   * in Rust (`midi::duration_seconds`). `null` if probing failed.
+   *
+   * Used by SongEditor's save flow to compute `<length>` as the max
+   * across all assigned media files (smoke-test finding F-2: the
+   * old WAV-only calculation under-reported when a MIDI file was
+   * longer than every WAV).
+   */
+  durationSeconds: number | null;
 }
 
 export type Diagnostic =
