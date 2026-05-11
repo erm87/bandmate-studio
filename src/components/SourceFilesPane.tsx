@@ -234,6 +234,21 @@ function TabButton({
 // Folder view — used for both tabs
 // ---------------------------------------------------------------------------
 
+/**
+ * Module-level cache of the most-recently-fetched file list per folder.
+ * Survives FolderView's mount lifecycle so that switching back to a
+ * song you've already viewed renders its file list immediately,
+ * instead of flashing through the loading state inside the editor
+ * pane's view transition.
+ *
+ * The cache is refreshed on every successful re-fetch (background
+ * revalidation), and invalidated implicitly by `refreshKey` bumps
+ * from the parent (which already exists for post-save MIDI cleanliness
+ * updates). Memory cost is negligible — each entry is a small array
+ * of AudioFileInfo objects.
+ */
+const folderListCache = new Map<string, AudioFileInfo[]>();
+
 function FolderView({
   folder,
   refreshKey,
@@ -259,17 +274,33 @@ function FolderView({
   headerAction: React.ReactNode | null;
   emptyHint: React.ReactNode;
 }) {
-  const [files, setFiles] = useState<AudioFileInfo[]>([]);
-  const [loading, setLoading] = useState(false);
+  // Seed from the module cache so re-visited folders render their
+  // files immediately. If the cache miss, we start empty + show the
+  // loading state on the initial fetch.
+  const [files, setFiles] = useState<AudioFileInfo[]>(
+    () => folderListCache.get(folder) ?? [],
+  );
+  // Don't show "Loading…" on a cache hit — the user already sees a
+  // file list, and the background re-fetch will update it silently.
+  const [loading, setLoading] = useState(
+    () => !folderListCache.has(folder),
+  );
   const [error, setError] = useState<string | null>(null);
   const [contextMenu, setContextMenu] = useState<OpenContextMenu | null>(null);
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
+    // On cache miss show the spinner; on cache hit the existing files
+    // stay visible while we revalidate quietly.
+    if (!folderListCache.has(folder)) {
+      setLoading(true);
+    }
     setError(null);
     listAudioFiles(folder)
       .then((list) => {
+        // Refresh the cache regardless of mount state — a stale cache
+        // would defeat the whole point on the next visit.
+        folderListCache.set(folder, list);
         if (!cancelled) setFiles(list);
       })
       .catch((e) => {

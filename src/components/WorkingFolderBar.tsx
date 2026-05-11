@@ -96,12 +96,23 @@ export function WorkingFolderBar() {
         >
           Change
         </button>
+        {/*
+          Tonal button — middle of the visual hierarchy:
+            primary  = bg-brand-500 text-white (Save, dialog confirms)
+            tonal    = bg-brand-50  text-brand-700 (this)
+            tertiary = border bg-white text-zinc-700 (Change, ghost icons)
+          Export to USB is a persistent top-bar control that only gets
+          used at the end of the workflow. Demoting it from solid-
+          primary keeps it discoverable without making it the loudest
+          control on screen — so the workflow-level primary (Save in
+          the editor headers, etc.) can still own the user's eye.
+        */}
         <button
           type="button"
           onClick={() => setExportOpen(true)}
           disabled={isLoading}
           title="Copy bm_media/ onto a USB stick"
-          className="rounded-md bg-brand-500 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2 disabled:opacity-50 dark:focus-visible:ring-offset-zinc-950"
+          className="rounded-md bg-brand-50 px-3 py-1.5 text-sm font-medium text-brand-700 transition hover:bg-brand-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2 disabled:opacity-50 dark:bg-brand-950/40 dark:text-brand-300 dark:hover:bg-brand-900/40 dark:focus-visible:ring-offset-zinc-950"
         >
           Export to USB
         </button>

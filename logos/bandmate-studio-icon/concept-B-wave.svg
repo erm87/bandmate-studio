@@ -1,0 +1,65 @@
+<svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!--
+    BandMate Studio app icon — sound wave on neon-blue.
+
+    Design rationale:
+    - One full sine cycle (peak + trough), symmetric, centered. Reads
+      as audio/sound at every size from 1024 down to the macOS Dock's
+      32px minimum.
+    - Cyan neon-tube aesthetic, built from 4 stacked stroke layers
+      (widest halo → mid halo → main tube → bright core highlight)
+      so the glow renders without depending on SVG filters, which
+      not all rasterizers handle identically.
+    - Deep-navy radial-gradient background — slightly lighter at the
+      top for natural light direction, falling off to near-black at
+      the corners. Matches the brand palette we use in-app.
+    - macOS squircle (rx/ry = 232 of 1024) for native Big Sur+ icon
+      shape.
+
+    Color tokens (kept in lockstep with tailwind.config.js):
+    - bg gradient: #0e2659 → #06163d → #000a1f (custom navy ramp).
+    - cyan halo: #22D3EE (Tailwind cyan-400 / our accent-400).
+    - cyan tube: #67E8F9 (cyan-300 / accent-300) — slightly lighter
+      than the halo so the core "lifts" against it.
+    - core highlight: #FFFFFF @ 80% — the "filament" inside the tube.
+  -->
+  <defs>
+    <radialGradient id="bgB" cx="50%" cy="35%" r="70%">
+      <stop offset="0%" stop-color="#0e2659"/>
+      <stop offset="65%" stop-color="#06163d"/>
+      <stop offset="100%" stop-color="#000a1f"/>
+    </radialGradient>
+  </defs>
+
+  <!-- Squircle background -->
+  <rect width="1024" height="1024" rx="232" ry="232" fill="url(#bgB)"/>
+
+  <!-- Hairline edge ring for definition against the Dock bg -->
+  <rect x="3" y="3" width="1018" height="1018" rx="229" ry="229"
+        fill="none" stroke="#22D3EE" stroke-opacity="0.1" stroke-width="2"/>
+
+  <!--
+    The wave: one full cycle from x=192 → x=832, baseline y=512,
+    amplitude 200. Q-control points are at y=112 (above) and
+    y=912 (below); at the midpoint of each Q-curve the actual
+    path reaches y=312 (peak) and y=712 (trough) per the
+    parabolic Bézier identity ( (P0 + 2C + P2) / 4 ).
+  -->
+
+  <!-- Outer halo: widest, lowest opacity — the soft glow -->
+  <path d="M 192 512 Q 352 112 512 512 Q 672 912 832 512"
+        stroke="#22D3EE" stroke-opacity="0.18" stroke-width="200"
+        fill="none" stroke-linecap="round"/>
+  <!-- Mid halo -->
+  <path d="M 192 512 Q 352 112 512 512 Q 672 912 832 512"
+        stroke="#22D3EE" stroke-opacity="0.42" stroke-width="120"
+        fill="none" stroke-linecap="round"/>
+  <!-- Main neon tube -->
+  <path d="M 192 512 Q 352 112 512 512 Q 672 912 832 512"
+        stroke="#67E8F9" stroke-width="64"
+        fill="none" stroke-linecap="round"/>
+  <!-- Inner highlight (the "filament" inside the neon tube) -->
+  <path d="M 192 512 Q 352 112 512 512 Q 672 912 832 512"
+        stroke="#FFFFFF" stroke-opacity="0.78" stroke-width="20"
+        fill="none" stroke-linecap="round"/>
+</svg>
