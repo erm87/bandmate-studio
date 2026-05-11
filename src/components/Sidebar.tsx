@@ -609,46 +609,76 @@ export function Sidebar() {
           {trackMaps.length === 0 ? (
             <SectionEmpty hint="Use “+ New Track Map” above to name your output channels." />
           ) : (
-            trackMaps.map((tm) => {
-              const isActive =
-                sel?.kind === "trackMap" && sel.path === tm.path;
-              return (
-                <SidebarRow
-                  key={tm.path}
-                  // Display = filename without `_tm.jcm`. Safe because
-                  // NewTrackMapDialog auto-appends `_tm` on create —
-                  // the suffix is never user-typed. Full filename
-                  // available in the hover tooltip via `title`.
-                  // See matching comment in TrackMapEditor.trackMapName.
-                  label={tm.filename.replace(/_tm\.jcm$|\.jcm$/i, "")}
-                  title={`${tm.filename}${isActive ? " (click to deselect)" : ""}`}
-                  active={isActive}
-                  onClick={() =>
-                    toggleSelect({ kind: "trackMap", path: tm.path }, isActive)
-                  }
-                  onContextMenu={(e) =>
-                    openMenu(e, [
-                      {
-                        label: "Open in Finder",
-                        onClick: () => void revealInFileManager(tm.path),
-                      },
-                      "divider",
-                      renameTrackMapItem(tm),
-                      {
-                        label: "Duplicate",
-                        onClick: () => void handleDuplicateTrackMap(tm),
-                      },
-                      "divider",
-                      {
-                        label: "Delete",
-                        onClick: () => void handleDeleteTrackMap(tm),
-                        danger: true,
-                      },
-                    ])
-                  }
-                />
+            // Split into seeded (default_tm, stems_tm) + user-created.
+            // Seeded renders first with a "Template" badge so it reads
+            // as starter content rather than ad-hoc user data; hairline
+            // divider separates the two groups when both exist. Within
+            // each group, the order is whatever the scan returned
+            // (alphabetical today).
+            (() => {
+              const seeded = trackMaps.filter((tm) =>
+                SEEDED_TRACKMAP_FILENAMES.has(tm.filename),
               );
-            })
+              const userCreated = trackMaps.filter(
+                (tm) => !SEEDED_TRACKMAP_FILENAMES.has(tm.filename),
+              );
+              const renderRow = (
+                tm: (typeof trackMaps)[number],
+                isSeeded: boolean,
+              ) => {
+                const isActive =
+                  sel?.kind === "trackMap" && sel.path === tm.path;
+                return (
+                  <SidebarRow
+                    key={tm.path}
+                    // Display = filename without `_tm.jcm`. Safe because
+                    // NewTrackMapDialog auto-appends `_tm` on create —
+                    // the suffix is never user-typed. Full filename
+                    // available in the hover tooltip via `title`.
+                    // See matching comment in TrackMapEditor.trackMapName.
+                    label={tm.filename.replace(/_tm\.jcm$|\.jcm$/i, "")}
+                    title={`${tm.filename}${isActive ? " (click to deselect)" : ""}`}
+                    active={isActive}
+                    trailing={isSeeded ? <TemplateBadge /> : undefined}
+                    onClick={() =>
+                      toggleSelect({ kind: "trackMap", path: tm.path }, isActive)
+                    }
+                    onContextMenu={(e) =>
+                      openMenu(e, [
+                        {
+                          label: "Open in Finder",
+                          onClick: () => void revealInFileManager(tm.path),
+                        },
+                        "divider",
+                        renameTrackMapItem(tm),
+                        {
+                          label: "Duplicate",
+                          onClick: () => void handleDuplicateTrackMap(tm),
+                        },
+                        "divider",
+                        {
+                          label: "Delete",
+                          onClick: () => void handleDeleteTrackMap(tm),
+                          danger: true,
+                        },
+                      ])
+                    }
+                  />
+                );
+              };
+              return (
+                <>
+                  {seeded.map((tm) => renderRow(tm, true))}
+                  {seeded.length > 0 && userCreated.length > 0 && (
+                    <div
+                      aria-hidden="true"
+                      className="mx-4 my-1 border-t border-zinc-200 dark:border-zinc-800"
+                    />
+                  )}
+                  {userCreated.map((tm) => renderRow(tm, false))}
+                </>
+              );
+            })()
           )}
         </Section>
       </nav>
@@ -783,12 +813,19 @@ function SidebarRow({
   label,
   title,
   active,
+  trailing,
   onClick,
   onContextMenu,
 }: {
   label: string;
   title?: string;
   active?: boolean;
+  /**
+   * Optional trailing content rendered right-aligned in the row.
+   * Used for the "Template" badge on seeded trackmaps. Shrinks to
+   * fit; the label truncates around it.
+   */
+  trailing?: ReactNode;
   onClick: () => void;
   onContextMenu?: (e: React.MouseEvent) => void;
 }) {
@@ -798,15 +835,39 @@ function SidebarRow({
       onClick={onClick}
       onContextMenu={onContextMenu}
       className={cn(
-        "block w-full truncate px-4 py-1.5 text-left text-sm transition",
+        "flex w-full items-center gap-2 px-4 py-1.5 text-left text-sm transition",
         active
           ? "bg-brand-500 text-white"
           : "text-zinc-800 hover:bg-zinc-200 dark:text-zinc-200 dark:hover:bg-zinc-900",
       )}
       title={title ?? label}
     >
-      {label}
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      {trailing && <span className="shrink-0">{trailing}</span>}
     </button>
+  );
+}
+
+/**
+ * Filenames seeded into every fresh working folder by Rust
+ * `init_working_folder` (see lib.rs `SEED_DEFAULT_TM` / `SEED_STEMS_TM`).
+ * These render at the top of the Track Maps section with a "Template"
+ * badge so they read as starter content rather than user data.
+ */
+const SEEDED_TRACKMAP_FILENAMES = new Set([
+  "default_tm.jcm",
+  "stems_tm.jcm",
+]);
+
+/** Small muted pill used for the "Template" tag on seeded trackmaps. */
+function TemplateBadge() {
+  return (
+    <span
+      className="rounded border border-zinc-300 px-1.5 py-0 text-3xs font-semibold uppercase tracking-wider text-zinc-500 dark:border-zinc-700 dark:text-zinc-400"
+      // No hover affordance — it's a label, not an action.
+    >
+      Template
+    </span>
   );
 }
 

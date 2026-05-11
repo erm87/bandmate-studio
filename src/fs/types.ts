@@ -87,6 +87,13 @@ export interface AudioFileInfo {
    * longer than every WAV).
    */
   durationSeconds: number | null;
+  /**
+   * Last-modified time as Unix epoch seconds (from `fs::metadata`).
+   * Surfaced in SourceFilesPane row subtitles so the user can spot
+   * the most-recent take in a Logic export folder. `null` if the
+   * metadata read failed.
+   */
+  modifiedSeconds: number | null;
 }
 
 export type Diagnostic =

@@ -64,12 +64,41 @@ export interface UserPrefs {
    * song folders. Source-folder MIDI files are never touched.
    */
   cleanMidiOnImport: boolean;
+  /**
+   * Filename (not full path) of the user's preferred track map for
+   * new songs / playlists. The NewSongDialog and NewPlaylistDialog
+   * pre-select this in their track-map picker. Stored as a filename
+   * (e.g. "default_tm.jcm", "Diff_Test_tm.jcm") so it survives
+   * working-folder moves and reflects the on-disk identity. Falls
+   * back to "default_tm.jcm" (seeded by Studio's init) if the named
+   * file no longer exists in the current working folder.
+   */
+  defaultTrackMapJcm: string;
+  /**
+   * Sticky default USB export destination. When set, ExportToUsbDialog
+   * pre-selects this path and jumps to the "confirm" step on open,
+   * unless `state.lastExportDestPath` (session memory) is set — that
+   * wins because it reflects a more recent explicit choice. If neither
+   * applies or the saved path doesn't exist (stick unplugged), falls
+   * through to the picker. Most bands export to the same physical
+   * stick week after week so setting this once removes the picker
+   * friction across app launches.
+   *
+   * Stored as an absolute filesystem path (e.g. "/Volumes/BANDMATE").
+   * Empty string / undefined = no default set.
+   */
+  defaultExportDestPath: string;
 }
 
 export const DEFAULT_USER_PREFS: UserPrefs = {
   colorMode: "auto",
   defaultSampleRate: 48000,
   cleanMidiOnImport: false,
+  // Seeded by init_working_folder; safe to reference even in a fresh
+  // working folder. Consumers fall back gracefully if missing.
+  defaultTrackMapJcm: "default_tm.jcm",
+  // Empty string = no sticky default; export dialog uses the picker.
+  defaultExportDestPath: "",
 };
 
 /**
@@ -94,6 +123,15 @@ export function loadUserPrefs(): UserPrefs {
         typeof parsed.cleanMidiOnImport === "boolean"
           ? parsed.cleanMidiOnImport
           : DEFAULT_USER_PREFS.cleanMidiOnImport,
+      defaultTrackMapJcm:
+        typeof parsed.defaultTrackMapJcm === "string" &&
+        parsed.defaultTrackMapJcm.length > 0
+          ? parsed.defaultTrackMapJcm
+          : DEFAULT_USER_PREFS.defaultTrackMapJcm,
+      defaultExportDestPath:
+        typeof parsed.defaultExportDestPath === "string"
+          ? parsed.defaultExportDestPath
+          : DEFAULT_USER_PREFS.defaultExportDestPath,
     };
   } catch {
     return { ...DEFAULT_USER_PREFS };

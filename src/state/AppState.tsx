@@ -76,6 +76,16 @@ export interface AppState {
    * inline ↑ ↓ reorder buttons on the highlighted row.
    */
   playlistRowSelection: number | null;
+  /**
+   * Session memory: the destination path of the most-recent successful
+   * USB export. Used by `ExportToUsbDialog` to pre-select the same
+   * destination on subsequent exports, skipping the picker when the
+   * user is iterating export → fix → export. Resets when the working
+   * folder changes (the previous USB stick probably belongs to a
+   * different project) and on app launch. NOT persisted across
+   * launches — that's `userPrefs.defaultExportDestPath`'s job.
+   */
+  lastExportDestPath: string | null;
 }
 
 const EMPTY_SCAN: ScanResult = { songs: [], playlists: [], trackMaps: [] };
@@ -89,6 +99,7 @@ const INITIAL_STATE: AppState = {
   selection: null,
   channelSelection: null,
   playlistRowSelection: null,
+  lastExportDestPath: null,
 };
 
 // ---------------------------------------------------------------------------
@@ -101,6 +112,7 @@ export type AppAction =
   | { type: "scan_failed"; error: string }
   | { type: "clear_working_folder" }
   | { type: "set_user_prefs"; prefs: UserPrefs }
+  | { type: "set_last_export_dest_path"; path: string | null }
   | { type: "select"; selection: Selection }
   | { type: "clear_selection" }
   | { type: "select_channel"; channel: number | null }
@@ -114,6 +126,12 @@ function reducer(state: AppState, action: AppAction): AppState {
         workingFolder: action.path,
         status: "loading",
         error: null,
+        // Switching working folders invalidates session memory of the
+        // last export destination — a new project probably ships to
+        // a different USB stick. (Resets on same-path rescans too;
+        // harmless since the export dest doesn't depend on scan.)
+        lastExportDestPath:
+          state.workingFolder === action.path ? state.lastExportDestPath : null,
       };
     case "scan_succeeded": {
       // After a re-scan, if the previously-selected item no longer
@@ -155,10 +173,14 @@ function reducer(state: AppState, action: AppAction): AppState {
       };
     case "clear_working_folder":
       // Preserve userPrefs when forgetting the working folder — these
-      // are user-level preferences, not project-scoped state.
+      // are user-level preferences, not project-scoped state. Note:
+      // lastExportDestPath does NOT survive this transition — a new
+      // working folder probably exports to a different USB stick.
       return { ...INITIAL_STATE, userPrefs: state.userPrefs };
     case "set_user_prefs":
       return { ...state, userPrefs: action.prefs };
+    case "set_last_export_dest_path":
+      return { ...state, lastExportDestPath: action.path };
     case "select":
       // Reset both editor sub-selections when sidebar selection
       // changes — the new editor opens fresh, no carryover highlight.

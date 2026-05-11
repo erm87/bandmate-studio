@@ -70,20 +70,25 @@ export function NewPlaylistDialog({ isOpen, onClose }: Props) {
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Reset form whenever the dialog opens. The default track map is
-  // the first available one — for most users with one .jcm in the
-  // working folder, this is the right pre-selection. Sample rate
-  // pulls from userPrefs so changing the Settings default takes
-  // effect on the next open.
+  // userPrefs.defaultTrackMapJcm if it exists in the current scan;
+  // otherwise the first available. Sample rate likewise pulls from
+  // userPrefs. Changing either Settings default takes effect on the
+  // next open of the dialog.
+  const defaultTrackMapJcm = state.userPrefs.defaultTrackMapJcm;
   useEffect(() => {
     if (isOpen) {
       setName("");
       setSampleRate(defaultRate);
-      setTrackMapPath(state.scan.trackMaps[0]?.filename ?? "");
+      const preferred = state.scan.trackMaps.find(
+        (tm) => tm.filename === defaultTrackMapJcm,
+      );
+      const fallback = state.scan.trackMaps[0]?.filename ?? "";
+      setTrackMapPath(preferred?.filename ?? fallback);
       setCreating(false);
       setCreateError(null);
       requestAnimationFrame(() => inputRef.current?.focus());
     }
-  }, [isOpen, state.scan.trackMaps, defaultRate]);
+  }, [isOpen, state.scan.trackMaps, defaultRate, defaultTrackMapJcm]);
 
   // ESC closes (unless we're mid-create).
   useEffect(() => {

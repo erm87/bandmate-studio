@@ -427,28 +427,44 @@ export function SongEditor({ jcsPath }: Props) {
           if (typeof sidecar.sourceFolder === "string") {
             setSourceFolder(sidecar.sourceFolder);
           }
-          // Restore the previously-chosen preview trackmap if the
-          // sidecar has one AND the file still exists in the working
-          // folder. If either condition fails, fall through to the
-          // auto-pick effect below (picks the first scanned trackmap).
-          if (
-            typeof sidecar.previewTrackMap === "string" &&
-            sidecar.previewTrackMap.length > 0
-          ) {
+          // Resolution order for the song's preview trackmap:
+          //   1. Sidecar's previewTrackMap (user previously picked
+          //      one for THIS song).
+          //   2. userPrefs.defaultTrackMapJcm (their global default
+          //      for any new song).
+          //   3. Auto-pick effect below (first scanned trackmap) —
+          //      the catch-all when neither preference applies or
+          //      the referenced file doesn't exist.
+          // Try (1), then (2). Each attempt validates the filename
+          // against the current scan and re-parses the trackmap
+          // content. Silent fall-through on any miss.
+          const tryLoadTrackMapByFilename = async (
+            filename: string | null | undefined,
+          ): Promise<boolean> => {
+            if (typeof filename !== "string" || filename.length === 0)
+              return false;
             const tm = state.scan.trackMaps.find(
-              (t) => t.filename === sidecar.previewTrackMap,
+              (t) => t.filename === filename,
             );
-            if (tm) {
-              try {
-                const tmText = await readTextFile(tm.path);
-                if (!cancelled) {
-                  setTrackMap(parseTrackMap(tmText));
-                  setTrackMapSource(tm.path);
-                }
-              } catch {
-                /* fall through to auto-pick */
-              }
+            if (!tm) return false;
+            try {
+              const tmText = await readTextFile(tm.path);
+              if (cancelled) return true; // suppress further attempts
+              setTrackMap(parseTrackMap(tmText));
+              setTrackMapSource(tm.path);
+              return true;
+            } catch {
+              return false;
             }
+          };
+
+          const sidecarLoaded = await tryLoadTrackMapByFilename(
+            sidecar.previewTrackMap,
+          );
+          if (!sidecarLoaded && !cancelled) {
+            await tryLoadTrackMapByFilename(
+              state.userPrefs.defaultTrackMapJcm,
+            );
           }
         } catch {
           /* swallow — older songs have no sidecar */

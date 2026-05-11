@@ -734,6 +734,25 @@ function TrackMapList({
                 value={value}
                 onChange={(e) => onLabelChange(idx, e.target.value)}
                 onFocus={() => onSelectRow(idx)}
+                // Enter / Escape both blur the input but keep the row
+                // selected (selectedRow stays === idx on blur). This
+                // lets the user type a label, press Enter, and immediately
+                // use ↑ / ↓ / Delete to reorder or clear without
+                // reaching for the mouse.
+                //
+                // We don't implement true "revert on Escape" — onLabelChange
+                // commits per-keystroke into the editor's snapshot/undo
+                // stack, so a proper revert would need a separate
+                // pre-edit snapshot. For now Escape just blurs; the user
+                // can ⌘Z to undo if they typed something they didn't mean
+                // to keep.
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === "Escape") {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    e.currentTarget.blur();
+                  }
+                }}
                 placeholder={
                   isMidi ? "(MIDI label, e.g. Kemper)" : `Channel ${idx + 1}`
                 }
