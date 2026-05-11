@@ -308,6 +308,11 @@ pub struct AudioFileInfo {
     /// only considered WAV durations and could under-report when a
     /// MIDI file was the longest media in a song.
     pub duration_seconds: Option<f64>,
+    /// Last-modified time as Unix epoch seconds. Surfaced in
+    /// SourceFilesPane row subtitles so the user can spot the most-
+    /// recent take when re-importing from a Logic export folder that
+    /// accumulates multiple renders. `None` if `fs::metadata` failed.
+    pub modified_seconds: Option<f64>,
 }
 
 /// File-level diagnostic. We surface these in the source-files pane.
@@ -390,6 +395,16 @@ fn list_audio_files(folder: String) -> Result<Vec<AudioFileInfo>, String> {
             _ => None,
         };
 
+        // Last-modified time (Unix epoch seconds). The .duration_since
+        // can fail if mtime is before the epoch — extremely unusual,
+        // surfaces as None.
+        let modified_seconds = entry
+            .metadata()
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs_f64());
+
         out.push(AudioFileInfo {
             filename,
             path: path_str,
@@ -398,6 +413,7 @@ fn list_audio_files(folder: String) -> Result<Vec<AudioFileInfo>, String> {
             diagnostic,
             is_midi_clean,
             duration_seconds,
+            modified_seconds,
         });
     }
 

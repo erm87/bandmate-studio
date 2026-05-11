@@ -484,6 +484,45 @@ type RowSeverity = "clean" | "warning" | "error" | "midi";
 /** What's specifically wrong with an error-class file. */
 type ErrorReason = "stereo" | "corrupt" | "rate";
 
+/**
+ * Format a Unix epoch seconds value as "modified YYYY-MM-DD HH:MM" in
+ * the user's local time zone. Returns null if no value or it's
+ * implausibly old (Unix epoch — usually means no metadata read).
+ */
+function formatModified(seconds: number | null): string | null {
+  if (seconds == null || seconds < 1) return null;
+  const d = new Date(seconds * 1000);
+  const pad = (n: number) => n.toString().padStart(2, "0");
+  return (
+    `modified ${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}` +
+    ` ${pad(d.getHours())}:${pad(d.getMinutes())}`
+  );
+}
+
+/**
+ * Format a Unix epoch seconds value as a relative time ("2 days ago",
+ * "5 minutes ago", "just now"). Used as the title-attribute tooltip
+ * on top of the absolute form, so the user can hover for a quick
+ * scanning read. Returns null for invalid/missing input.
+ */
+function formatModifiedRelative(seconds: number | null): string | null {
+  if (seconds == null || seconds < 1) return null;
+  const now = Date.now() / 1000;
+  const delta = now - seconds;
+  if (delta < 0) return null; // future-dated; suspicious — skip
+  if (delta < 60) return "just now";
+  const mins = Math.floor(delta / 60);
+  if (mins < 60) return `${mins} minute${mins === 1 ? "" : "s"} ago`;
+  const hours = Math.floor(mins / 60);
+  if (hours < 24) return `${hours} hour${hours === 1 ? "" : "s"} ago`;
+  const days = Math.floor(hours / 24);
+  if (days < 30) return `${days} day${days === 1 ? "" : "s"} ago`;
+  const months = Math.floor(days / 30);
+  if (months < 12) return `${months} month${months === 1 ? "" : "s"} ago`;
+  const years = Math.floor(days / 365);
+  return `${years} year${years === 1 ? "" : "s"} ago`;
+}
+
 function classifyRow(
   file: AudioFileInfo,
   songSampleRate: number,
@@ -540,7 +579,20 @@ function SourceFileRow({
   // available — even on warning files, where we recovered the spec via
   // the lenient header fallback.
   const subtitle = (() => {
-    if (file.kind === "mid") return "MIDI";
+    if (file.kind === "mid") {
+      // Show MIDI duration the same way we do for WAVs. The data
+      // is computed in Rust (midi::duration_seconds, walks the SMF
+      // events + tempo map) and surfaced on file.durationSeconds.
+      // Falls back to bare "MIDI" if the probe failed (rare).
+      if (file.durationSeconds != null && file.durationSeconds > 0) {
+        const mm = Math.floor(file.durationSeconds / 60);
+        const ss = Math.floor(file.durationSeconds % 60)
+          .toString()
+          .padStart(2, "0");
+        return `MIDI · ${mm}:${ss}`;
+      }
+      return "MIDI";
+    }
     if (severity === "error" && !file.wavInfo) {
       return file.diagnostic?.message ?? "Unreadable";
     }
@@ -553,6 +605,14 @@ function SourceFileRow({
     const chLabel = channels === 1 ? "mono" : `${channels}ch`;
     return `${(sampleRate / 1000).toFixed(1)} kHz · ${chLabel} · ${mm}:${ss}`;
   })();
+
+  // Secondary subtitle line — modified date. Surfaces underneath the
+  // main spec line so the user can spot which file in a folder of
+  // takes was rendered most recently. Format: 'modified 2026-05-09 14:32'
+  // (absolute, unambiguous). Hover tooltip shows a relative form like
+  // '2 days ago' for at-a-glance scanning.
+  const modifiedLine = formatModified(file.modifiedSeconds);
+  const modifiedRelative = formatModifiedRelative(file.modifiedSeconds);
 
   const titleColor = {
     clean: "text-zinc-700 dark:text-zinc-300",
@@ -600,6 +660,14 @@ function SourceFileRow({
           >
             {subtitle}
           </p>
+          {modifiedLine && (
+            <p
+              className="truncate text-2xs text-zinc-400 dark:text-zinc-600"
+              title={modifiedRelative ?? undefined}
+            >
+              {modifiedLine}
+            </p>
+          )}
         </div>
         {severity === "midi" && (
           <>

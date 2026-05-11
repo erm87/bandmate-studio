@@ -25,7 +25,7 @@
  */
 
 import { useEffect, useState } from "react";
-import { ask } from "@tauri-apps/plugin-dialog";
+import { ask, open as openDialog } from "@tauri-apps/plugin-dialog";
 import { cn } from "../lib/cn";
 import { cleanMidiFile, listAudioFiles } from "../fs/workingFolder";
 import { useAppState } from "../state/AppState";
@@ -326,31 +326,150 @@ function PreviewArtwork({
 
 function DefaultsSection() {
   const { state, setUserPrefs } = useAppState();
-  const current = state.userPrefs.defaultSampleRate;
+  const currentRate = state.userPrefs.defaultSampleRate;
+  const currentTrackMap = state.userPrefs.defaultTrackMapJcm;
+  const trackMaps = state.scan.trackMaps;
+  // If the saved default doesn't exist in the current working folder,
+  // surface that gently so the user understands the fallback. Doesn't
+  // auto-rewrite the pref — they might be switching working folders
+  // back and forth and we don't want to forget their preference.
+  const currentTrackMapMissing =
+    trackMaps.length > 0 &&
+    !trackMaps.some((tm) => tm.filename === currentTrackMap);
   return (
-    <section className="flex flex-col gap-3">
+    <section className="flex flex-col gap-5">
+      <div className="flex flex-col gap-3">
+        <p className="text-xs uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+          Default sample rate
+        </p>
+        <div className="flex gap-2">
+          <SampleRateChip
+            rate={44100}
+            label="44.1 kHz"
+            isActive={currentRate === 44100}
+            onSelect={() => setUserPrefs({ defaultSampleRate: 44100 })}
+          />
+          <SampleRateChip
+            rate={48000}
+            label="48 kHz"
+            isActive={currentRate === 48000}
+            onSelect={() => setUserPrefs({ defaultSampleRate: 48000 })}
+          />
+        </div>
+        <p className="mt-1 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
+          Pre-fills the sample-rate selector when you create a new song or
+          playlist. You can still override it for any individual file.
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-3">
+        <p className="text-xs uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
+          Default track map
+        </p>
+        <select
+          value={currentTrackMap}
+          onChange={(e) =>
+            setUserPrefs({ defaultTrackMapJcm: e.target.value })
+          }
+          disabled={trackMaps.length === 0}
+          className="user-text w-full rounded-md border border-zinc-200 bg-white px-3 py-2 font-mono text-sm text-zinc-700 shadow-sm focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-300"
+        >
+          {trackMaps.length === 0 && (
+            <option value="">(no track maps in working folder)</option>
+          )}
+          {/* If the saved default isn't in the scan, render it as a
+              synthesized option so the dropdown reflects the user's
+              stored preference rather than silently swapping to the
+              first available. */}
+          {currentTrackMapMissing && (
+            <option value={currentTrackMap}>
+              {currentTrackMap} (not in this folder)
+            </option>
+          )}
+          {trackMaps.map((tm) => (
+            <option key={tm.path} value={tm.filename}>
+              {tm.filename}
+            </option>
+          ))}
+        </select>
+        <p className="mt-1 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
+          Pre-selects this track map when you create a new song or playlist.
+          {currentTrackMapMissing && (
+            <>
+              {" "}
+              The selected file isn't in the current working folder — new
+              songs and playlists will fall back to{" "}
+              <span className="font-mono">default_tm.jcm</span> for now.
+            </>
+          )}
+        </p>
+      </div>
+
+      <DefaultExportDestField />
+    </section>
+  );
+}
+
+/**
+ * Default USB export destination — sticky path that pre-selects in
+ * ExportToUsbDialog when there's no session memory. Useful for bands
+ * that ship to the same physical stick week after week.
+ */
+function DefaultExportDestField() {
+  const { state, setUserPrefs } = useAppState();
+  const current = state.userPrefs.defaultExportDestPath;
+
+  const handleChoose = async () => {
+    const result = await openDialog({ directory: true, multiple: false });
+    if (typeof result === "string") {
+      setUserPrefs({ defaultExportDestPath: result });
+    }
+  };
+  const handleClear = () => {
+    setUserPrefs({ defaultExportDestPath: "" });
+  };
+
+  return (
+    <div className="flex flex-col gap-3">
       <p className="text-xs uppercase tracking-wider text-zinc-500 dark:text-zinc-400">
-        Default sample rate
+        Default USB export destination
       </p>
-      <div className="flex gap-2">
-        <SampleRateChip
-          rate={44100}
-          label="44.1 kHz"
-          isActive={current === 44100}
-          onSelect={() => setUserPrefs({ defaultSampleRate: 44100 })}
-        />
-        <SampleRateChip
-          rate={48000}
-          label="48 kHz"
-          isActive={current === 48000}
-          onSelect={() => setUserPrefs({ defaultSampleRate: 48000 })}
-        />
+      <div className="flex items-center gap-2">
+        <span
+          className={cn(
+            "user-text min-w-0 flex-1 truncate rounded-md border px-3 py-2 font-mono text-xs",
+            current
+              ? "border-zinc-200 bg-white text-zinc-700 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-300"
+              : "border-dashed border-zinc-300 bg-transparent italic text-zinc-400 dark:border-zinc-700 dark:text-zinc-600",
+          )}
+          title={current || "No default set"}
+        >
+          {current || "No default set"}
+        </span>
+        <button
+          type="button"
+          onClick={() => void handleChoose()}
+          className="shrink-0 rounded-md border border-zinc-200 bg-white px-3 py-2 text-xs font-medium text-zinc-700 transition hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-900"
+        >
+          {current ? "Change…" : "Choose…"}
+        </button>
+        {current && (
+          <button
+            type="button"
+            onClick={handleClear}
+            className="shrink-0 rounded-md px-2 py-2 text-xs font-medium text-zinc-500 transition hover:bg-zinc-100 hover:text-zinc-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100"
+          >
+            Clear
+          </button>
+        )}
       </div>
       <p className="mt-1 text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
-        Pre-fills the sample-rate selector when you create a new song or
-        playlist. You can still override it for any individual file.
+        Pre-selects this destination when you open Export to USB. If the
+        path isn't currently mounted (stick unplugged), the dialog falls
+        back to the folder picker. Remembered mount point, not an auto-
+        detector — different sticks must be picked once.
       </p>
-    </section>
+    </div>
   );
 }
 

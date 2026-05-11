@@ -19,6 +19,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import {
   ejectVolume,
   exportToUsb,
+  fileExists,
   subscribeExportProgress,
   type ExportProgress,
   type ExportSummary,
@@ -38,7 +39,7 @@ interface Props {
 type Step = "pick" | "confirm" | "copying" | "done" | "error";
 
 export function ExportToUsbDialog({ isOpen, onClose }: Props) {
-  const { state } = useAppState();
+  const { state, dispatch } = useAppState();
   const workingFolder = state.workingFolder;
 
   const [step, setStep] = useState<Step>("pick");
@@ -54,6 +55,13 @@ export function ExportToUsbDialog({ isOpen, onClose }: Props) {
   // Reset every time the dialog opens. Also subscribe to progress
   // events for the lifetime of the open dialog — listeners are cheap
   // and we want to be ready before the user clicks Export.
+  //
+  // Destination resolution: try session memory (`lastExportDestPath`)
+  // first. If the path still exists, pre-select it and jump straight
+  // to the "confirm" step — skipping the picker is the whole win for
+  // export → fix → re-export iteration loops. If the path no longer
+  // exists (USB stick ejected between exports) or there's no session
+  // memory, fall through to the standard "pick" step.
   useEffect(() => {
     if (!isOpen) return;
     setStep("pick");
@@ -75,6 +83,44 @@ export function ExportToUsbDialog({ isOpen, onClose }: Props) {
 
     let unlisten: (() => void) | null = null;
     let cancelled = false;
+
+    // Pre-select a destination if we have one to suggest. Resolution
+    // order:
+    //   1. Session memory (`state.lastExportDestPath`) — set after a
+    //      successful export this session. Wins because it reflects
+    //      the most recent EXPLICIT user choice.
+    //   2. Persistent default (`userPrefs.defaultExportDestPath`) —
+    //      the user's sticky preference from Settings.
+    //   3. Fall through to the "pick" step (today's behavior).
+    // Each candidate is validated via fileExists before pre-selecting;
+    // a stale path (stick ejected) falls through to the next layer.
+    const candidates = [
+      { path: state.lastExportDestPath, source: "session" as const },
+      {
+        path: state.userPrefs.defaultExportDestPath,
+        source: "settings" as const,
+      },
+    ];
+    void (async () => {
+      for (const { path, source } of candidates) {
+        if (!path) continue;
+        const exists = await fileExists(path);
+        if (cancelled) return;
+        if (exists) {
+          setDestPath(path);
+          setStep("confirm");
+          return;
+        }
+        // Stale session-memory path — clear it so the next attempt
+        // skips this layer. Don't auto-clear the persistent default
+        // (the user explicitly set it; preserve their preference even
+        // if the stick happens to be unplugged right now).
+        if (source === "session") {
+          dispatch({ type: "set_last_export_dest_path", path: null });
+        }
+      }
+    })();
+
     void subscribeExportProgress((p) => {
       if (cancelled) return;
       setProgress(p);
@@ -89,7 +135,13 @@ export function ExportToUsbDialog({ isOpen, onClose }: Props) {
       cancelled = true;
       unlisten?.();
     };
-  }, [isOpen, state.scan]);
+  }, [
+    isOpen,
+    state.scan,
+    state.lastExportDestPath,
+    state.userPrefs.defaultExportDestPath,
+    dispatch,
+  ]);
 
   // ESC closes when not actively copying.
   useEffect(() => {
@@ -120,6 +172,9 @@ export function ExportToUsbDialog({ isOpen, onClose }: Props) {
       const result = await exportToUsb(workingFolder, destPath);
       setSummary(result);
       setStep("done");
+      // Remember this destination for the rest of the session — next
+      // time the dialog opens we pre-select it and skip the picker.
+      dispatch({ type: "set_last_export_dest_path", path: destPath });
     } catch (e) {
       setErrorMsg(e instanceof Error ? e.message : String(e));
       setStep("error");
