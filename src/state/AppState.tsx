@@ -25,6 +25,7 @@ import { ask } from "@tauri-apps/plugin-dialog";
 
 import { initAndScan, pickFolder } from "../fs/workingFolder";
 import type { ScanResult } from "../fs/types";
+import { withViewTransition } from "../lib/viewTransition";
 import {
   DEFAULT_USER_PREFS,
   loadUserPrefs,
@@ -404,7 +405,12 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
       if (cur && sameSelection(cur, selection)) return;
       const ok = await confirmDiscardIfDirty();
       if (!ok) return;
-      dispatch({ type: "select", selection });
+      // Wrap the dispatch in a view transition so the editor pane
+      // crossfades to the new selection instead of hard-cutting. VT
+      // is scoped via `view-transition-name` on the editor pane
+      // wrapper (see EditorPane.tsx) so the sidebar update stays
+      // sharp — only the editor area animates.
+      withViewTransition(() => dispatch({ type: "select", selection }));
     },
     [confirmDiscardIfDirty, state.selection],
   );
@@ -413,7 +419,7 @@ export function AppStateProvider({ children }: { children: ReactNode }) {
     if (!state.selection) return;
     const ok = await confirmDiscardIfDirty();
     if (!ok) return;
-    dispatch({ type: "clear_selection" });
+    withViewTransition(() => dispatch({ type: "clear_selection" }));
   }, [confirmDiscardIfDirty, state.selection]);
 
   const value = useMemo<AppContextValue>(

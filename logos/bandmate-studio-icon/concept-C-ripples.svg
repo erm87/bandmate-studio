@@ -1,0 +1,30 @@
+<svg viewBox="0 0 1024 1024" xmlns="http://www.w3.org/2000/svg">
+  <!--
+    Concept C — Concentric ripples.
+    A central pulse with three expanding rings, suggesting sound
+    radiating from a source. Abstract enough to not be a literal
+    metaphor but clearly audio-coded; reads cleanly at 32px because
+    the rings are simple primitives.
+  -->
+  <defs>
+    <radialGradient id="bgC" cx="50%" cy="35%" r="70%">
+      <stop offset="0%" stop-color="#0e2659"/>
+      <stop offset="65%" stop-color="#06163d"/>
+      <stop offset="100%" stop-color="#000a1f"/>
+    </radialGradient>
+  </defs>
+  <rect width="1024" height="1024" rx="232" ry="232" fill="url(#bgC)"/>
+
+  <g transform="translate(512 512)">
+    <!-- Outermost ring, soft -->
+    <circle r="380" fill="none" stroke="#22D3EE" stroke-opacity="0.25" stroke-width="22"/>
+    <!-- Middle ring -->
+    <circle r="280" fill="none" stroke="#22D3EE" stroke-opacity="0.5" stroke-width="28"/>
+    <!-- Inner ring -->
+    <circle r="180" fill="none" stroke="#67E8F9" stroke-width="34"/>
+    <!-- Central pulse — halo + sharp core -->
+    <circle r="100" fill="#22D3EE" fill-opacity="0.3"/>
+    <circle r="70" fill="#67E8F9"/>
+    <circle r="50" fill="#FFFFFF" fill-opacity="0.8"/>
+  </g>
+</svg>

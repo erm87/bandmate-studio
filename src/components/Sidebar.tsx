@@ -639,7 +639,9 @@ export function Sidebar() {
                     label={tm.filename.replace(/_tm\.jcm$|\.jcm$/i, "")}
                     title={`${tm.filename}${isActive ? " (click to deselect)" : ""}`}
                     active={isActive}
-                    trailing={isSeeded ? <TemplateBadge /> : undefined}
+                    trailing={
+                      isSeeded ? <TemplateBadge isSelected={isActive} /> : undefined
+                    }
                     onClick={() =>
                       toggleSelect({ kind: "trackMap", path: tm.path }, isActive)
                     }
@@ -859,11 +861,20 @@ const SEEDED_TRACKMAP_FILENAMES = new Set([
   "stems_tm.jcm",
 ]);
 
-/** Small muted pill used for the "Template" tag on seeded trackmaps. */
-function TemplateBadge() {
+/**
+ * Small muted pill used for the "Template" tag on seeded trackmaps.
+ * Inverts to a white-tinted look when the row is selected (blue bg)
+ * so the badge stays legible against the brand-blue fill.
+ */
+function TemplateBadge({ isSelected }: { isSelected: boolean }) {
   return (
     <span
-      className="rounded border border-zinc-300 px-1.5 py-0 text-3xs font-semibold uppercase tracking-wider text-zinc-500 dark:border-zinc-700 dark:text-zinc-400"
+      className={cn(
+        "rounded border px-1.5 py-0 text-3xs font-semibold uppercase tracking-wider",
+        isSelected
+          ? "border-white/40 text-white/80"
+          : "border-zinc-300 text-zinc-500 dark:border-zinc-700 dark:text-zinc-400",
+      )}
       // No hover affordance — it's a label, not an action.
     >
       Template

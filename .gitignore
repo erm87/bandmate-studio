@@ -42,3 +42,6 @@ src-tauri/.cargo-lock
 
 # Reverse-engineered BM Loader reference (research material; not part of the rebuild)
 decompiled/
+
+# TypeScript incremental build cache
+tsconfig.tsbuildinfo
