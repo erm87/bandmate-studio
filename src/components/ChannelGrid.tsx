@@ -349,6 +349,8 @@ export function ChannelGrid({
             onDrop: (e: React.DragEvent) => handleDrop(idx, e),
           };
           if (isMidiSlot) {
+            const midiIsLongest =
+              midi !== undefined && midi.filename === longestFilename;
             return (
               <MidiRow
                 key="midi"
@@ -356,6 +358,8 @@ export function ChannelGrid({
                 filename={midi?.filename ?? null}
                 cleanState={midiClean}
                 onClean={onCleanMidi}
+                isLongest={midiIsLongest}
+                longestDurationLabel={longestDurationLabel}
                 isSelected={isSelected}
                 isDragOver={isDragOver}
                 dragMode={dragMode}
@@ -970,6 +974,8 @@ function MidiRow({
   filename,
   cleanState,
   onClean,
+  isLongest,
+  longestDurationLabel,
   isSelected,
   isDragOver,
   dragMode,
@@ -984,6 +990,16 @@ function MidiRow({
   cleanState: boolean | null;
   /** Trigger a clean on the assigned MIDI file. */
   onClean: () => Promise<void>;
+  /**
+   * True when the assigned MIDI file is the longest media in the song
+   * (its duration set `<length>` on save). Common when the MIDI runs
+   * past the last WAV (e.g. trailing program changes the Kemper needs).
+   * Renders the stopwatch indicator in the icon slot, matching the
+   * AudioRow treatment.
+   */
+  isLongest: boolean;
+  /** Formatted song duration ("m:ss") — shown in the stopwatch tooltip. */
+  longestDurationLabel: string;
   isSelected: boolean;
   isDragOver: boolean;
   dragMode: DropMode | null;
@@ -1058,7 +1074,21 @@ function MidiRow({
       >
         {label || <span className="italic text-zinc-400">unnamed</span>}
       </span>
-      <span /> {/* icon slot */}
+      {/* Icon slot — stopwatch when the MIDI is the longest media in
+          the song (its duration set <length>). Same treatment as the
+          AudioRow stopwatch so users can spot which file determines
+          song duration regardless of whether it's WAV or MIDI. */}
+      <span className="flex items-center justify-center">
+        {isLongest && filename ? (
+          <span
+            className="inline-flex h-4 w-4 items-center justify-center rounded bg-zinc-200 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
+            title={`Longest file in this song (${longestDurationLabel}) — its length sets the song's overall duration. The BandMate plays through until this file ends.`}
+            aria-label={`Longest file in this song (${longestDurationLabel})`}
+          >
+            <StopwatchIcon className="h-3 w-3" />
+          </span>
+        ) : null}
+      </span>
       <span
         className="user-text truncate font-mono text-xs"
         title={filename ?? ""}

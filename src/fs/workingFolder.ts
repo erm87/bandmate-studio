@@ -227,14 +227,27 @@ export async function createSong(
 
 /**
  * Per-song sidecar: `<song-folder>/.bandmate-studio.json`. Used to
- * stash BandMate Studio-only metadata (currently the external source
- * folder for the source-files pane). The dotfile prefix means the
+ * stash BandMate Studio-only metadata that doesn't have a place in
+ * the BandMate's own file formats. The dotfile prefix means the
  * BandMate hardware filters it out, and the file lives next to the
  * .jcs so it travels when the working folder is moved.
+ *
+ * Fields are all optional — older songs (from BM Loader) won't have
+ * a sidecar at all. Callers should treat missing fields as "no
+ * preference set" and fall back to sensible defaults.
  */
 export interface SongSidecar {
   /** Where the user picked their unimported WAVs from, or null/undefined. */
   sourceFolder?: string | null;
+  /**
+   * Filename (not full path) of the trackmap the user picked in the
+   * song editor's Track Map dropdown. Studio-only preview preference
+   * — the BandMate hardware never reads this; playback labels come
+   * from the playlist's `<trackmap>` element. Stored so the choice
+   * survives navigating away and back. Null/missing → SongEditor
+   * falls back to its auto-pick (first scanned trackmap).
+   */
+  previewTrackMap?: string | null;
 }
 
 /**

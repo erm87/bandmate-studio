@@ -327,6 +327,42 @@ The point of all the above is THIS works.
 
 ## Findings
 
+### F-8: USB export doesn't filter `.bandmate-studio.json` sidecars
+**Section:** 8 (added: local export comparison before §9 device validation)
+**Severity:** minor — Studio-only files reaching USB; harmless to BandMate (dotfile prefix), but leaks local Mac paths in the sidecar's `sourceFolder` field.
+**Repro:** Export a working folder to a folder via Studio. Inspect the destination — each song folder contains a `.bandmate-studio.json`.
+**Expected:** Studio-only sidecars stay in the working folder, not on USB.
+**Actual:** `copy_tree_with_progress` + `count_tree` filtered `.DS_Store` and `._*` but not `.bandmate-studio.json`. Both songs' sidecars were copied to the destination. The sidecar contains the user's local `sourceFolder` path and `previewTrackMap` filename — neither belongs on a portable USB stick.
+**Fix:** Extracted the skip rule into one helper (`is_export_excluded`) that handles all three categories: `.DS_Store`, `._*`, and `.bandmate-studio.json`. Both the count and copy paths call through it now.
+**Fixed in:** _(this branch; commit pending)_
+
+### Studio export advantage over BM Loader: `.DS_Store` filtering
+**Section:** 8
+**Not a finding — calling it out for the record.**
+The export diff also showed Loader leaving a `.DS_Store` file in `bm_media/` on its export output (Finder created it sometime during testing). BM Loader doesn't filter `.DS_Store` during copy; it relies on `dot_clean -m`, which only handles `._*` AppleDouble siblings. Studio explicitly skips `.DS_Store` during copy (and continues to also run `dot_clean -m` for `._*`). Net: Studio's USB export is cleaner than Loader's. No action.
+
+### F-7: Longest-file stopwatch on wrong row when MIDI is longest
+**Section:** 8 (caught while reviewing Diff_Test_A after F-2 verification)
+**Severity:** minor (cosmetic — `<length>` on disk is correct; only the channel-grid indicator is wrong)
+**Repro:** Build a song where the MIDI file is longer than every assigned WAV (the F-2 scenario). After save, open the song editor.
+**Expected:** The stopwatch indicator appears next to the MIDI row (Kemper at slot 25). Header duration matches the MIDI length.
+**Actual:** Header duration is correct (reads `<length>` which F-2 fixed). But the stopwatch icon is on the longest WAV row, not the MIDI row.
+**Root cause:** Two parallel longest-file computations existed: (a) save-time in `SongEditor.performSave` — fixed in F-2 to include MIDI; (b) view-time in the folder-probe `useEffect` (~line 470) — still WAV-only. They drifted apart. The save-time path wrote the correct `<length>`; the view-time path picked the longest WAV for the stopwatch indicator.
+**Fix:** (1) View-time loop now mirrors save-time: considers both kinds, converts `durationSeconds × songRate` to samples. (2) `MidiRow` in `ChannelGrid` gains `isLongest` + `longestDurationLabel` props and renders the stopwatch in its icon slot when applicable, matching the AudioRow treatment.
+**Fixed in:** _(this branch; commit pending)_
+
+### F-6: Loader-side `<trackmap>` reference stale after rename
+**Section:** 8 (diff)
+**Severity:** none for Studio (we're correct); minor Loader quirk
+**Repro:** In BM Loader, create a trackmap named `Diff_Test_TM`, then later rename it to `Diff_Test_tm`. Open the playlist that referenced it. The `<trackmap>` element still contains the pre-rename filename.
+**Expected:** Playlist's `<trackmap>` element matches the actual filename on disk.
+**Actual:**
+  - File on disk in both apps: `Diff_Test_tm.jcm` (lowercase).
+  - Loader's `.jcp`: `<trackmap>Diff_Test_TM.jcm</trackmap>` (stale post-rename, capital `_TM`).
+  - Studio's `.jcp`: `<trackmap>Diff_Test_tm.jcm</trackmap>` (matches file).
+**Notes:** Loader doesn't appear to cascade trackmap renames into existing playlists' `<trackmap>` references. Studio does — `Sidebar.tsx`'s `renameTrackMap` flow (Phase 4.12) walks every `.jcp`, parses, swaps the reference if it matches, writes back. Works in practice on macOS APFS / FAT32 because those filesystems are case-insensitive; would break on a case-sensitive filesystem.
+**Fix:** None needed in Studio. Classified as Expected delta. If we ever care about byte-equality with Loader output, we'd need to PRESERVE incorrect references (anti-pattern — skip).
+
 ### F-4: Studio doesn't seed `default_tm.jcm` / `stems_tm.jcm` on folder init
 **Section:** 8 (diff)
 **Severity:** minor — parity gap, not a correctness bug

@@ -1284,12 +1284,13 @@ fn count_tree(src: &Path) -> std::io::Result<(u64, u64)> {
             files += f;
             bytes += b;
         } else if kind.is_file() {
-            // Skip macOS hidden metadata that we'd be cleaning out
-            // anyway — counting them inflates the "total" against
-            // the post-cleanup reality.
+            // Skip files that won't make it to USB. See
+            // `is_export_excluded` for the rule list. Counting them
+            // would inflate the "total" against the post-filter
+            // reality.
             let name = entry.file_name();
             let name_str = name.to_string_lossy();
-            if name_str == ".DS_Store" || name_str.starts_with("._") {
+            if is_export_excluded(&name_str) {
                 continue;
             }
             files += 1;
@@ -1299,10 +1300,27 @@ fn count_tree(src: &Path) -> std::io::Result<(u64, u64)> {
     Ok((files, bytes))
 }
 
+/// True if a file should be filtered out of USB export. Three categories:
+///   - macOS Finder metadata: `.DS_Store` (shows up in BandMate's
+///     directory listings; harmless but ugly).
+///   - AppleDouble siblings: `._foo` (created by macOS on FAT32 /
+///     exFAT; the BandMate currently mixes these into the playlist
+///     menu as fake entries — see Bandmate/MANUAL_ADDITIONS.md).
+///   - Studio-only sidecars: `.bandmate-studio.json` (stash file for
+///     per-song Studio prefs — source folder, preview trackmap. The
+///     BandMate has no use for them; they also leak local Mac paths
+///     to the USB stick).
+fn is_export_excluded(name: &str) -> bool {
+    name == ".DS_Store"
+        || name == ".bandmate-studio.json"
+        || name.starts_with("._")
+}
+
 /// Recursively copy `src` → `dst`, emitting per-file progress events
-/// to the frontend. Skips macOS metadata (`.DS_Store`, `._*`) on the
-/// way in — `dot_clean` cleans up afterward but skipping during copy
-/// avoids the AppleDouble files ever existing on the destination.
+/// to the frontend. Skips files per `is_export_excluded` (macOS
+/// metadata, AppleDouble siblings, Studio-only sidecars) — `dot_clean`
+/// cleans up `._*` afterward too, but filtering during copy avoids
+/// the AppleDouble files ever existing on the destination.
 fn copy_tree_with_progress(
     src: &Path,
     dst: &Path,
@@ -1318,7 +1336,7 @@ fn copy_tree_with_progress(
         let kind = entry.file_type().map_err(|e| e.to_string())?;
         let name = entry.file_name();
         let name_str = name.to_string_lossy().to_string();
-        if name_str == ".DS_Store" || name_str.starts_with("._") {
+        if is_export_excluded(&name_str) {
             continue;
         }
         let from = entry.path();
