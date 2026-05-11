@@ -116,6 +116,19 @@ export function TrackMapEditor({ jcmPath }: Props) {
 
   const draftMap = editor.current?.map ?? null;
 
+  // Display name = filename without the `_tm.jcm` (or plain `.jcm`)
+  // suffix. The `_tm` decoration is guaranteed to be system-added
+  // because `NewTrackMapDialog` auto-appends it (and BM Loader's
+  // bundled templates already use it), so stripping it doesn't
+  // eat user-typed content. The full filename (with suffix) stays
+  // available via the row's hover tooltip.
+  //
+  // History note: an earlier iteration (smoke-test F-1) stripped
+  // here too, but BEFORE auto-append was in place — which meant
+  // a user who typed `Diff_Test_TM` saw `Diff_Test` in the UI and
+  // got UI↔filename divergence. The auto-append (F-4) closed that
+  // loop: now the suffix is never user input, so display stripping
+  // is safe again.
   const trackMapName = useMemo(
     () =>
       (jcmPath.split("/").pop() ?? "(unknown)")

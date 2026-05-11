@@ -924,15 +924,28 @@ export function SongEditor({ jcsPath }: Props) {
         await maybeAutoCleanMidi(destPath, s.cleanMidiOnImport);
       }
       const list = await listAudioFiles(s.songFolder);
-      const assigned = new Set(
+      const assignedWavs = new Set(
         s.snapshot.song.audioFiles.map((f) => f.filename),
       );
+      const assignedMidi = s.snapshot.song.midiFile?.filename ?? null;
+      // <length> = max(durations of ASSIGNED media). Both WAV and MIDI
+      // count — BM Loader includes MIDI duration in this calculation
+      // (smoke-test finding F-2). The MIDI duration is needed so the
+      // BandMate plays long enough for any trailing program changes
+      // at the end of the MIDI to fire before auto-advancing.
+      const songRate = s.snapshot.song.sampleRate;
       let maxSamples = 0;
       let newLongest: string | null = null;
       for (const f of list) {
-        if (f.kind !== "wav") continue;
-        if (!assigned.has(f.filename)) continue;
-        const samples = f.wavInfo?.durationSamples ?? 0;
+        const isAssignedWav =
+          f.kind === "wav" && assignedWavs.has(f.filename);
+        const isAssignedMidi =
+          f.kind === "mid" && assignedMidi === f.filename;
+        if (!isAssignedWav && !isAssignedMidi) continue;
+        // Convert seconds → samples at the song's rate so the value
+        // we write into <length> is in the same units as BM Loader's.
+        const seconds = f.durationSeconds ?? 0;
+        const samples = Math.round(seconds * songRate);
         if (samples > maxSamples) {
           maxSamples = samples;
           newLongest = f.filename;
@@ -1003,16 +1016,22 @@ export function SongEditor({ jcsPath }: Props) {
           const destPath = await copyIntoFolder(sourcePath, created.folderPath);
           await maybeAutoCleanMidi(destPath, s.cleanMidiOnImport);
         }
-        // Step 3: probe + recompute longest.
+        // Step 3: probe + recompute longest. Includes MIDI (see
+        // performSave for the rationale — finding F-2).
         const list = await listAudioFiles(created.folderPath);
-        const assigned = new Set(
+        const assignedWavs = new Set(
           s.snapshot.song.audioFiles.map((f) => f.filename),
         );
+        const assignedMidi = s.snapshot.song.midiFile?.filename ?? null;
+        const songRate = s.snapshot.song.sampleRate;
         let maxSamples = 0;
         for (const f of list) {
-          if (f.kind !== "wav") continue;
-          if (!assigned.has(f.filename)) continue;
-          const samples = f.wavInfo?.durationSamples ?? 0;
+          const isAssignedWav =
+            f.kind === "wav" && assignedWavs.has(f.filename);
+          const isAssignedMidi =
+            f.kind === "mid" && assignedMidi === f.filename;
+          if (!isAssignedWav && !isAssignedMidi) continue;
+          const samples = Math.round((f.durationSeconds ?? 0) * songRate);
           if (samples > maxSamples) maxSamples = samples;
         }
         const finalSong: Song = {

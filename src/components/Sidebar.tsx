@@ -615,6 +615,11 @@ export function Sidebar() {
               return (
                 <SidebarRow
                   key={tm.path}
+                  // Display = filename without `_tm.jcm`. Safe because
+                  // NewTrackMapDialog auto-appends `_tm` on create —
+                  // the suffix is never user-typed. Full filename
+                  // available in the hover tooltip via `title`.
+                  // See matching comment in TrackMapEditor.trackMapName.
                   label={tm.filename.replace(/_tm\.jcm$|\.jcm$/i, "")}
                   title={`${tm.filename}${isActive ? " (click to deselect)" : ""}`}
                   active={isActive}

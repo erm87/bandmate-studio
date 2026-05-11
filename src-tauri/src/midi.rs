@@ -29,7 +29,7 @@
 //     Returns the count of removed events so the caller can decide
 //     whether to surface a notification.
 
-use midly::{MetaMessage, Smf, TrackEvent, TrackEventKind};
+use midly::{MetaMessage, Smf, Timing, TrackEvent, TrackEventKind};
 use serde::Serialize;
 use std::fs;
 use std::path::Path;
@@ -64,6 +64,68 @@ fn keep_event(kind: &TrackEventKind<'_>) -> bool {
         TrackEventKind::SysEx(_) | TrackEventKind::Escape(_) => true,
         // Meta events: filtered by keep_meta.
         TrackEventKind::Meta(m) => keep_meta(m),
+    }
+}
+
+/// Compute the duration of an SMF file in seconds. Used by
+/// `list_audio_files` so that `SongEditor`'s save flow can include
+/// MIDI files in the "longest assigned media" calculation that
+/// writes `<length>` into the `.jcs` — matches BM Loader, which
+/// otherwise wins this race (smoke-test finding F-2).
+///
+/// Algorithm: per track, accumulate elapsed seconds by walking
+/// delta-time + applying the current `set_tempo`. Update the
+/// running tempo AFTER processing each event (the new tempo
+/// applies to subsequent events, not the set_tempo event itself).
+/// Return the maximum elapsed time across tracks.
+///
+/// Defaults: 500_000 µs / quarter note (120 BPM) if no set_tempo
+/// is ever seen.
+///
+/// SMPTE-timed files (rare) use the timecode-based formula
+/// `seconds = total_ticks / (fps * subframes_per_frame)`.
+pub fn duration_seconds(path: &Path) -> Result<f64, String> {
+    let bytes = fs::read(path).map_err(|e| format!("Cannot read {}: {}", path.display(), e))?;
+    let smf = Smf::parse(&bytes).map_err(|e| format!("Not a valid MIDI file: {}", e))?;
+
+    match smf.header.timing {
+        Timing::Metrical(tpb) => {
+            let ticks_per_beat = tpb.as_int() as f64;
+            if ticks_per_beat <= 0.0 {
+                return Err("Invalid ticks-per-beat (must be > 0)".to_string());
+            }
+            let mut max_seconds: f64 = 0.0;
+            for track in &smf.tracks {
+                let mut elapsed: f64 = 0.0;
+                // SMF default: 120 BPM if no set_tempo present.
+                let mut tempo_us_per_quarter: u32 = 500_000;
+                for ev in track {
+                    let delta = ev.delta.as_int() as f64;
+                    elapsed += (delta / ticks_per_beat)
+                        * (tempo_us_per_quarter as f64 / 1_000_000.0);
+                    if let TrackEventKind::Meta(MetaMessage::Tempo(t)) = ev.kind {
+                        tempo_us_per_quarter = t.as_int();
+                    }
+                }
+                if elapsed > max_seconds {
+                    max_seconds = elapsed;
+                }
+            }
+            Ok(max_seconds)
+        }
+        Timing::Timecode(fps, sub_per_frame) => {
+            let denom = fps.as_f32() as f64 * sub_per_frame as f64;
+            if denom <= 0.0 {
+                return Err("Invalid SMPTE timing parameters".to_string());
+            }
+            let max_ticks: u64 = smf
+                .tracks
+                .iter()
+                .map(|t| t.iter().map(|e| e.delta.as_int() as u64).sum::<u64>())
+                .max()
+                .unwrap_or(0);
+            Ok(max_ticks as f64 / denom)
+        }
     }
 }
 

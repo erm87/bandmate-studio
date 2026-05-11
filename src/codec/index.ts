@@ -92,48 +92,62 @@ export function createEmptyPlaylist(
  * Identifier for one of the built-in label templates surfaced in the
  * New Track Map dialog.
  */
-export type TrackMapTemplate = "empty" | "default" | "stems" | "brigades";
+export type TrackMapTemplate =
+  | "empty"
+  | "default"
+  | "stems"
+  | "modernPlayback";
 
 /**
  * User-facing description of each template — shown next to the radio
  * picker so the user can see what they're choosing before clicking
  * Create.
+ *
+ * `default` and `stems` are byte-identical (semantically) to BM
+ * Loader's bundled `default_tm.jcm` and `stems_tm.jcm` templates so
+ * users coming from BM Loader find the familiar layouts.
+ *
+ * `modernPlayback` is the channel layout used by Brigades' live rig
+ * (Lights / Click / RefL/R / Guitars / SynthSamples / 808s / Vox +
+ * Kemper on the MIDI slot) — useful as a starting point for any band
+ * doing playback-driven shows with a separate Kemper MIDI channel.
  */
 export const TRACK_MAP_TEMPLATE_DESCRIPTIONS: Record<TrackMapTemplate, string> = {
   empty:
     "All 25 slots blank. Use when you'll define your channel layout from scratch.",
   default:
-    "Generic numbered labels (Track 1 … Track 24, MIDI). Closest to BM Loader's default.",
+    "BM Loader's bundled default layout — drum kit + bass/guitar/keys + horns/percussion/vocals + stereo mix bus + MIDI on slot 25.",
   stems:
-    "Multitrack drum / band stems (Kick, Snare, OH L/R, Bass, Gtrs, Keys, Vox, etc.). Good starting point for a band recording.",
-  brigades:
-    "Brigades' live rig layout (Lights / Click / RefL / RefR / Guitars / SynthSamples / 808s / Vox + Kemper on the MIDI slot). Matches erictest_tm.jcm.",
+    "BM Loader's bundled stems layout — Click + three stereo stem pairs + keys + vocals/horns/percussion + stereo mix bus + MIDI on slot 25.",
+  modernPlayback:
+    "Live playback rig — Lights / Click / RefL / RefR / Guitars / SynthSamples / 808s / Vox + Kemper on the MIDI slot. Good starting point for a band doing programmed playback + patch-switching guitar.",
 };
 
-/** 25-slot template tables, indexed by template name. Index 24 is the MIDI slot. */
+/**
+ * 25-slot template tables, indexed by template name. Index 24 is the
+ * MIDI slot.
+ *
+ * `default` and `stems` mirror the labels in BM Loader's bundled
+ * `default_tm.jcm` and `stems_tm.jcm` (see `__fixtures__/`).
+ */
 const TRACK_MAP_TEMPLATES: Record<TrackMapTemplate, string[]> = {
   empty: Array(25).fill(""),
   default: [
-    "Track 1", "Track 2", "Track 3", "Track 4", "Track 5", "Track 6",
-    "Track 7", "Track 8", "Track 9", "Track 10", "Track 11", "Track 12",
-    "Track 13", "Track 14", "Track 15", "Track 16", "Track 17", "Track 18",
-    "Track 19", "Track 20", "Track 21", "Track 22", "Track 23", "Track 24",
+    "Click", "Hihat", "Kick", "Snare", "TomsL", "TomsR", "Overhead",
+    "Bass", "RhythmG", "Keys1L", "Keys1R", "BVox1", "BVox2", "Horns1",
+    "Horns2", "Perc1", "Perc2", "Sax", "Lead Vox", "Lead G", "Moog",
+    "noises off", "MixL", "MixR",
     "MIDI",
   ],
   stems: [
-    "Kick In", "Kick Out", "Snare Top", "Snare Bot", "Hihat",
-    "Tom 1", "Tom 2", "Floor Tom", "OH L", "OH R",
-    "Bass DI", "Bass Amp",
-    "Gtr 1", "Gtr 2",
-    "Keys L", "Keys R",
-    "Vox Lead", "BGV L", "BGV R",
-    "Click", "Refs",
-    "", "", "",
+    "Click", "", "Stem1L", "Stem1R", "Stem2L", "Stem2R", "Stem3L",
+    "Stem3R", "Keys1L", "Keys1R", "", "", "BVox1", "BVox2", "Horns1",
+    "Horns2", "Perc1", "Perc2", "", "", "", "", "MixL", "MixR",
     "MIDI",
   ],
-  // Matches Eric's erictest_tm.jcm exactly so the "Brigades-style"
-  // template plays nice with his existing playlist + song set.
-  brigades: [
+  // Matches Eric's erictest_tm.jcm exactly so a band whose rig is
+  // shaped like Brigades' can use this as a one-click starting point.
+  modernPlayback: [
     "Lights", "Click", "RefL", "RefR", "Guitars", "SynthSamples", "808s",
     "Vox",
     "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "",
