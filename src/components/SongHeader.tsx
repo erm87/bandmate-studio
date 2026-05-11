@@ -87,7 +87,10 @@ export function SongHeader({
           onChange={onSampleRateChange}
         />
 
-        <label className="flex shrink-0 items-center gap-2">
+        <label
+          className="flex shrink-0 items-center gap-2"
+          title="Preview the channel labels for this song with the chosen track map. Playback uses the playlist's track map — this picker doesn't affect what reaches the BandMate."
+        >
           <span className="eyebrow">
             Track Map
           </span>

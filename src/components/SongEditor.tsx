@@ -184,6 +184,24 @@ function cascadeShift(
   return { audioFiles: newAudio, pendingCopies: newPending };
 }
 
+/**
+ * Module-level cache of the most-recently-loaded trackmap. Outlives
+ * SongEditor's mount lifecycle so that navigating between songs that
+ * use the same trackmap doesn't flicker through "no selection" before
+ * the sidecar/auto-pick resolves. The new editor instance initializes
+ * its trackmap state from this cache; if the new song's sidecar
+ * preference differs, the dropdown then transitions to the right
+ * value — a legitimate visual change rather than a glitch.
+ *
+ * Reset implicitly when the cached path is no longer in the current
+ * scan (e.g., user switched working folders).
+ */
+let cachedTrackMap: {
+  path: string;
+  filename: string;
+  map: TrackMap;
+} | null = null;
+
 /** Translates a DropMode shift to a cascade `direction` (or null for replace). */
 function shiftDirection(mode: "replace" | "shiftUp" | "shiftDown"): -1 | 1 | null {
   if (mode === "shiftUp") return -1;
@@ -236,8 +254,28 @@ export function SongEditor({ jcsPath }: Props) {
   const [saving, setSaving] = useState(false);
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [trackMap, setTrackMap] = useState<TrackMap | null>(null);
-  const [trackMapSource, setTrackMapSource] = useState<string | null>(null);
+  // Initialize from the module cache so navigating between songs that
+  // share a trackmap doesn't flicker through the default state. The
+  // cached value is only honored if it still exists in the current
+  // scan — otherwise we fall back to null and the auto-pick/sidecar
+  // load decides what to show.
+  const cachedStillValid =
+    cachedTrackMap !== null &&
+    state.scan.trackMaps.some((t) => t.path === cachedTrackMap!.path);
+  const [trackMap, setTrackMap] = useState<TrackMap | null>(
+    () => (cachedStillValid ? cachedTrackMap!.map : null),
+  );
+  const [trackMapSource, setTrackMapSource] = useState<string | null>(
+    () => (cachedStillValid ? cachedTrackMap!.path : null),
+  );
+
+  // Keep the cache in sync with the latest in-component selection.
+  useEffect(() => {
+    if (trackMap && trackMapSource) {
+      const filename = trackMapSource.split("/").pop() ?? "";
+      cachedTrackMap = { path: trackMapSource, filename, map: trackMap };
+    }
+  }, [trackMap, trackMapSource]);
   const [longestFilename, setLongestFilename] = useState<string | null>(null);
   /**
    * Counter bumped after save / save-as / manual MIDI clean. Threaded
@@ -385,8 +423,32 @@ export function SongEditor({ jcsPath }: Props) {
         // Sidecar is best-effort — never fail the editor open over it.
         try {
           const sidecar = await readSongSidecar(songFolder);
-          if (!cancelled && typeof sidecar.sourceFolder === "string") {
+          if (cancelled) return;
+          if (typeof sidecar.sourceFolder === "string") {
             setSourceFolder(sidecar.sourceFolder);
+          }
+          // Restore the previously-chosen preview trackmap if the
+          // sidecar has one AND the file still exists in the working
+          // folder. If either condition fails, fall through to the
+          // auto-pick effect below (picks the first scanned trackmap).
+          if (
+            typeof sidecar.previewTrackMap === "string" &&
+            sidecar.previewTrackMap.length > 0
+          ) {
+            const tm = state.scan.trackMaps.find(
+              (t) => t.filename === sidecar.previewTrackMap,
+            );
+            if (tm) {
+              try {
+                const tmText = await readTextFile(tm.path);
+                if (!cancelled) {
+                  setTrackMap(parseTrackMap(tmText));
+                  setTrackMapSource(tm.path);
+                }
+              } catch {
+                /* fall through to auto-pick */
+              }
+            }
           }
         } catch {
           /* swallow — older songs have no sidecar */
@@ -412,13 +474,28 @@ export function SongEditor({ jcsPath }: Props) {
       .then((list) => {
         if (cancelled) return;
         setFolderFiles(list);
-        // Recompute longest while we have the list.
-        const assigned = new Set(draftSong.audioFiles.map((f) => f.filename));
+        // Recompute longest while we have the list. Considers BOTH
+        // WAV and MIDI — must mirror performSave's max-duration loop
+        // so the stopwatch icon in the channel grid points at the
+        // same file as the one that determined the saved <length>.
+        // (Smoke-test finding F-7: previously this loop was WAV-only,
+        // so when a MIDI file was longer than every WAV the stopwatch
+        // landed on the longest WAV instead of the MIDI row.)
+        const assignedWavs = new Set(
+          draftSong.audioFiles.map((f) => f.filename),
+        );
+        const assignedMidi = draftSong.midiFile?.filename ?? null;
+        const songRate = draftSong.sampleRate;
         let longest: { name: string; samples: number } | null = null;
         for (const f of list) {
-          if (f.kind !== "wav") continue;
-          if (!assigned.has(f.filename)) continue;
-          const samples = f.wavInfo?.durationSamples ?? 0;
+          const isAssignedWav =
+            f.kind === "wav" && assignedWavs.has(f.filename);
+          const isAssignedMidi =
+            f.kind === "mid" && assignedMidi === f.filename;
+          if (!isAssignedWav && !isAssignedMidi) continue;
+          const samples = Math.round(
+            (f.durationSeconds ?? 0) * songRate,
+          );
           if (longest === null || samples > longest.samples) {
             longest = { name: f.filename, samples };
           }
@@ -514,6 +591,14 @@ export function SongEditor({ jcsPath }: Props) {
       const text = await readTextFile(path);
       setTrackMap(parseTrackMap(text));
       setTrackMapSource(path);
+      // Persist the choice as a Studio-only preview preference (sidecar
+      // field `previewTrackMap`). The BandMate hardware never reads
+      // this — playback labels come from the playlist's <trackmap>.
+      // Immediate-persist (no Save button needed) mirrors the
+      // sourceFolder pattern; the trackmap is a UI preview pref, not
+      // part of the song's content.
+      const filename = path.split("/").pop() ?? "";
+      void updateSidecar({ previewTrackMap: filename });
     } catch (e) {
       void e;
     }
@@ -817,20 +902,38 @@ export function SongEditor({ jcsPath }: Props) {
   );
 
   /**
+   * Merge-update the sidecar: read existing, overlay `partial`, write
+   * the whole thing back. Required because `writeSongSidecar` overwrites
+   * — without the merge a `sourceFolder` write would clobber any
+   * `previewTrackMap` field, and vice versa. Failures surface via
+   * `saveError` so the user notices the miss without blocking the
+   * editor.
+   */
+  const updateSidecar = useCallback(
+    async (partial: { sourceFolder?: string | null; previewTrackMap?: string | null }) => {
+      try {
+        const existing = await readSongSidecar(songFolder);
+        await writeSongSidecar(songFolder, { ...existing, ...partial });
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        setSaveError(`Sidecar didn't persist: ${msg}`);
+      }
+    },
+    [songFolder],
+  );
+
+  /**
    * Update the per-song source folder — both in local state (for the
-   * source pane) and in the on-disk sidecar (so it persists). Failures
-   * are surfaced via saveError; we don't want a silent persistence
-   * miss but it shouldn't block the editor.
+   * source pane) and in the on-disk sidecar (so it persists). Uses
+   * the merge helper so a sourceFolder write doesn't clobber
+   * previewTrackMap (or any other future field).
    */
   const handleChangeSourceFolder = useCallback(
     (path: string | null) => {
       setSourceFolder(path);
-      void writeSongSidecar(songFolder, { sourceFolder: path }).catch((e) => {
-        const msg = e instanceof Error ? e.message : String(e);
-        setSaveError(`Source folder didn't persist: ${msg}`);
-      });
+      void updateSidecar({ sourceFolder: path });
     },
-    [songFolder],
+    [updateSidecar],
   );
 
   const handleClearChannel = useCallback(() => {
@@ -1040,9 +1143,18 @@ export function SongEditor({ jcsPath }: Props) {
         };
         // Step 4: write the .jcs with current edits.
         await writeTextFile(created.jcsPath, writeSong(finalSong));
-        // Step 5: carry over sidecar source folder.
-        if (sourceFolder) {
-          await writeSongSidecar(created.folderPath, { sourceFolder });
+        // Step 5: carry over sidecar fields (source folder + preview
+        // trackmap). The duplicate-folder copy already includes the
+        // original's sidecar, but we write fresh so any in-memory
+        // changes (e.g. trackmap switched mid-edit) propagate, and
+        // so the field set is consistent.
+        const previewTrackMap =
+          trackMapSource?.split("/").pop() ?? null;
+        if (sourceFolder || previewTrackMap) {
+          await writeSongSidecar(created.folderPath, {
+            sourceFolder: sourceFolder ?? undefined,
+            previewTrackMap: previewTrackMap ?? undefined,
+          });
         }
         // Step 6: rescan + jump to the new copy. SongEditor remounts
         // on jcsPath change (via key), so the new editor instance
@@ -1059,7 +1171,7 @@ export function SongEditor({ jcsPath }: Props) {
         setSaving(false);
       }
     },
-    [dispatch, rescan, songName, sourceFolder, state.workingFolder],
+    [dispatch, rescan, songName, sourceFolder, trackMapSource, state.workingFolder],
   );
 
   // ---- Keyboard handlers --------------------------------------------------
