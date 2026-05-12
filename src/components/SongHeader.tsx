@@ -19,6 +19,7 @@
 
 import type { TrackMapSummary } from "../fs/types";
 import { cn } from "../lib/cn";
+import { Button } from "./Button";
 
 interface Props {
   songName: string;
@@ -136,20 +137,14 @@ export function SongHeader({
           </HistoryButton>
         </div>
 
-        <button
-          type="button"
+        <Button
+          size="sm"
           onClick={onSave}
           disabled={!isDirty || saving}
           title={isDirty ? "Save (⌘S)" : "No unsaved changes"}
-          className={cn(
-            "rounded-md px-3 py-1 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2",
-            isDirty && !saving
-              ? "bg-brand-500 text-white hover:bg-brand-600"
-              : "cursor-not-allowed bg-zinc-100 text-zinc-400 dark:bg-zinc-900 dark:text-zinc-600",
-          )}
         >
           {saving ? "Saving…" : "Save"}
-        </button>
+        </Button>
       </div>
 
       {/* Caption row — read-only metadata under the title. Tabular-nums

@@ -37,6 +37,7 @@ import {
 } from "../fs/workingFolder";
 import { useAppState } from "../state/AppState";
 import { cn } from "../lib/cn";
+import { Button } from "./Button";
 
 type CollisionMode = "rename" | "overwrite" | "skip";
 
@@ -577,31 +578,16 @@ export function ImportTrackMapDialog({
               : "Pick at least one track map to import."}
           </span>
           <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={onClose}
-              disabled={importing}
-              className="rounded-md px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 disabled:opacity-50 dark:text-zinc-300 dark:hover:bg-zinc-800"
-            >
+            <Button variant="ghost" onClick={onClose} disabled={importing}>
               Cancel
-            </button>
-            <button
-              type="button"
-              onClick={handleImport}
-              disabled={!canImport}
-              className={cn(
-                "rounded-md px-3 py-1.5 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2",
-                canImport
-                  ? "bg-brand-500 text-white hover:bg-brand-600"
-                  : "cursor-not-allowed bg-zinc-100 text-zinc-400 dark:bg-zinc-800 dark:text-zinc-500",
-              )}
-            >
+            </Button>
+            <Button onClick={handleImport} disabled={!canImport}>
               {importing
                 ? "Importing…"
                 : selected.size > 1
                   ? `Import ${selected.size} track maps`
                   : "Import"}
-            </button>
+            </Button>
           </div>
         </footer>
       </div>

@@ -32,6 +32,7 @@ import {
 } from "../fs/workingFolder";
 import { useAppState } from "../state/AppState";
 import { cn } from "../lib/cn";
+import { Button } from "./Button";
 
 interface Props {
   isOpen: boolean;
@@ -242,14 +243,13 @@ export function NewSongDialog({ isOpen, onClose }: Props) {
               Source Folder <span className="font-normal text-zinc-400">(optional)</span>
             </span>
             <div className="flex items-stretch gap-2">
-              <button
-                type="button"
+              <Button
+                variant="tertiary"
                 onClick={handlePickSourceFolder}
                 disabled={creating}
-                className="rounded-md border border-zinc-300 bg-white px-3 py-2 text-xs font-medium text-zinc-700 shadow-sm hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-200 dark:hover:bg-zinc-900"
               >
                 {sourceFolder ? "Change…" : "Choose folder…"}
-              </button>
+              </Button>
               <span
                 className="user-text flex-1 truncate self-center font-mono text-xs text-zinc-600 dark:text-zinc-400"
                 title={sourceFolder ?? ""}
@@ -275,27 +275,12 @@ export function NewSongDialog({ isOpen, onClose }: Props) {
         </div>
 
         <footer className="flex items-center justify-end gap-2 border-t border-zinc-200 px-5 py-3 dark:border-zinc-800">
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={creating}
-            className="rounded-md px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 disabled:opacity-50 dark:text-zinc-300 dark:hover:bg-zinc-800"
-          >
+          <Button variant="ghost" onClick={onClose} disabled={creating}>
             Cancel
-          </button>
-          <button
-            type="button"
-            onClick={handleCreate}
-            disabled={!canCreate}
-            className={cn(
-              "rounded-md px-3 py-1.5 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2",
-              canCreate
-                ? "bg-brand-500 text-white hover:bg-brand-600"
-                : "cursor-not-allowed bg-zinc-100 text-zinc-400 dark:bg-zinc-800 dark:text-zinc-500",
-            )}
-          >
+          </Button>
+          <Button onClick={handleCreate} disabled={!canCreate}>
             {creating ? "Creating…" : "Create"}
-          </button>
+          </Button>
         </footer>
       </div>
     </div>

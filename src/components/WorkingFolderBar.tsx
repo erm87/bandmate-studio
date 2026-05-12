@@ -18,6 +18,7 @@ import { useState } from "react";
 import { useAppState } from "../state/AppState";
 import { cn } from "../lib/cn";
 import { revealInFileManager } from "../fs/workingFolder";
+import { Button } from "./Button";
 import { ContextMenu, type OpenContextMenu } from "./ContextMenu";
 import { ExportToUsbDialog } from "./ExportToUsbDialog";
 import { SettingsDialog } from "./SettingsDialog";
@@ -87,15 +88,14 @@ export function WorkingFolderBar() {
             });
           }}
         />
-        <button
-          type="button"
+        <Button
+          variant="tertiary"
           onClick={() => {
             void chooseWorkingFolder();
           }}
-          className="rounded-md border border-zinc-200 bg-white px-3 py-1.5 text-sm font-medium text-zinc-700 transition hover:bg-zinc-50 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-900 dark:focus-visible:ring-offset-zinc-950"
         >
           Change
-        </button>
+        </Button>
         {/*
           Tonal button — middle of the visual hierarchy:
             primary  = bg-brand-500 text-white (Save, dialog confirms)
@@ -107,15 +107,14 @@ export function WorkingFolderBar() {
           control on screen — so the workflow-level primary (Save in
           the editor headers, etc.) can still own the user's eye.
         */}
-        <button
-          type="button"
+        <Button
+          variant="tonal"
           onClick={() => setExportOpen(true)}
           disabled={isLoading}
           title="Copy bm_media/ onto a USB stick"
-          className="rounded-md bg-brand-50 px-3 py-1.5 text-sm font-medium text-brand-700 transition hover:bg-brand-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2 disabled:opacity-50 dark:bg-brand-950/40 dark:text-brand-300 dark:hover:bg-brand-900/40 dark:focus-visible:ring-offset-zinc-950"
         >
           Export to USB
-        </button>
+        </Button>
         <IconButton onClick={() => setSettingsOpen(true)} title="Settings">
           <GearIcon className="h-4 w-4" />
         </IconButton>

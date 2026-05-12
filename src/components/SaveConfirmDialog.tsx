@@ -28,6 +28,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { cn } from "../lib/cn";
+import { Button } from "./Button";
 
 interface Props {
   isOpen: boolean;
@@ -232,40 +233,19 @@ export function SaveConfirmDialog({
         </div>
 
         <footer className="flex items-center justify-end gap-2 border-t border-zinc-200 px-5 py-3 dark:border-zinc-800">
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={busy !== null}
-            className="rounded-md px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 disabled:opacity-50 dark:text-zinc-300 dark:hover:bg-zinc-800"
-          >
+          <Button variant="ghost" onClick={onClose} disabled={busy !== null}>
             Cancel
-          </button>
-          <button
-            type="button"
+          </Button>
+          <Button
+            variant="tertiary"
             onClick={handleSaveAs}
             disabled={!canSaveAs}
-            className={cn(
-              "rounded-md border px-3 py-1.5 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2",
-              canSaveAs
-                ? "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                : "cursor-not-allowed border-zinc-200 bg-zinc-50 text-zinc-400 dark:border-zinc-800 dark:bg-zinc-900/40 dark:text-zinc-600",
-            )}
           >
             {busy === "saveAs" ? "Creating…" : "Save as new"}
-          </button>
-          <button
-            type="button"
-            onClick={handleSave}
-            disabled={!canSave}
-            className={cn(
-              "rounded-md px-3 py-1.5 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2",
-              canSave
-                ? "bg-brand-500 text-white hover:bg-brand-600"
-                : "cursor-not-allowed bg-zinc-100 text-zinc-400 dark:bg-zinc-800 dark:text-zinc-500",
-            )}
-          >
+          </Button>
+          <Button onClick={handleSave} disabled={!canSave}>
             {busy === "save" ? "Saving…" : "Save"}
-          </button>
+          </Button>
         </footer>
       </div>
     </div>

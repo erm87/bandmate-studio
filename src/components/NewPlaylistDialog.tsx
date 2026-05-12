@@ -27,6 +27,7 @@ import {
 } from "../fs/workingFolder";
 import { useAppState } from "../state/AppState";
 import { cn } from "../lib/cn";
+import { Button } from "./Button";
 
 interface Props {
   isOpen: boolean;
@@ -274,27 +275,12 @@ export function NewPlaylistDialog({ isOpen, onClose }: Props) {
         </div>
 
         <footer className="flex items-center justify-end gap-2 border-t border-zinc-200 px-5 py-3 dark:border-zinc-800">
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={creating}
-            className="rounded-md px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 disabled:opacity-50 dark:text-zinc-300 dark:hover:bg-zinc-800"
-          >
+          <Button variant="ghost" onClick={onClose} disabled={creating}>
             Cancel
-          </button>
-          <button
-            type="button"
-            onClick={handleCreate}
-            disabled={!canCreate}
-            className={cn(
-              "rounded-md px-3 py-1.5 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2",
-              canCreate
-                ? "bg-brand-500 text-white hover:bg-brand-600"
-                : "cursor-not-allowed bg-zinc-100 text-zinc-400 dark:bg-zinc-800 dark:text-zinc-500",
-            )}
-          >
+          </Button>
+          <Button onClick={handleCreate} disabled={!canCreate}>
             {creating ? "Creating…" : "Create"}
-          </button>
+          </Button>
         </footer>
       </div>
     </div>
