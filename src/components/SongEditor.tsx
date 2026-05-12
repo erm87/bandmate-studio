@@ -49,6 +49,7 @@ import {
   writeTextFile,
 } from "../fs/workingFolder";
 import { classifySongFolderFiles, suggestDuplicateName } from "../lib/references";
+import { bestChannelForFilename } from "../lib/sourceMatch";
 import { diffSongs } from "../lib/snapshotDiff";
 import type { AudioFileInfo } from "../fs/types";
 import { useAppState } from "../state/AppState";
@@ -57,6 +58,7 @@ import { CleanupConfirmDialog } from "./CleanupConfirmDialog";
 import { SaveConfirmDialog } from "./SaveConfirmDialog";
 import { SongHeader } from "./SongHeader";
 import { SourceFilesPane } from "./SourceFilesPane";
+import { Toast } from "./Toast";
 import { UndoHistoryPanel } from "./UndoHistoryPanel";
 
 interface Props {
@@ -311,6 +313,14 @@ export function SongEditor({ jcsPath }: Props) {
   const [cleanupCandidates, setCleanupCandidates] = useState<
     AudioFileInfo[] | null
   >(null);
+  /**
+   * Single-slot non-blocking toast. Currently set by the Import-all
+   * flow to communicate counts; rendered at the bottom-right of the
+   * editor pane via `<Toast>` and auto-dismisses after a few seconds.
+   * If we add more transient notifications later, consider a queue
+   * — single-slot is fine for the one current caller.
+   */
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const draftSong = editor.current?.song ?? null;
 
@@ -327,7 +337,11 @@ export function SongEditor({ jcsPath }: Props) {
     const result: string[] = [];
     for (let i = 0; i < TRACK_MAP_CHANNEL_COUNT; i++) {
       const fromMap = trackMap?.channels[i];
-      result.push(fromMap && fromMap.length > 0 ? fromMap : `Ch ${i + 1}`);
+      // Unlabeled channels render blank in the editor so the user's
+      // eye lands on the channels their track-map actually defines.
+      // The numeric channel index stays visible in the leading "CH"
+      // column for reference.
+      result.push(fromMap && fromMap.length > 0 ? fromMap : "");
     }
     return result;
   }, [trackMap]);
@@ -967,6 +981,264 @@ export function SongEditor({ jcsPath }: Props) {
   );
 
   /**
+   * "Import all" button on the Source Folder tab.
+   *
+   * Walks the source folder, splits files into two buckets:
+   *
+   *   1. Smart-matched assignments. For each `.wav`, we compare the
+   *      file's stem (filename without extension, lowercased) against
+   *      the lowercased trackmap channel labels. A hit lands the file
+   *      on that channel — but only if the channel is currently empty
+   *      (existing assignments are never overwritten). The change
+   *      goes through `applyEdit` so it's undoable + dirties the
+   *      editor (Save required to commit). The matched WAV's actual
+   *      bytes get queued in `pendingCopies` and copy in on Save,
+   *      mirroring the single-file click flow.
+   *
+   *   2. Unmatched / overflow files. WAVs whose stem doesn't match
+   *      any labeled channel, OR whose matching channel is occupied,
+   *      get copied directly into the song folder via
+   *      `copyIntoFolder` — no channel assignment. They show up in
+   *      the Song Folder tab immediately so the user can find them
+   *      and click-assign manually later. Same for any MIDI beyond
+   *      the first when the MIDI slot is already filled.
+   *
+   * The first MIDI file is the lone MIDI exception — it lands on the
+   * MIDI slot if that slot is empty (BandMate only has one MIDI
+   * channel). Subsequent MIDIs fall into the direct-copy bucket.
+   *
+   * Stereo WAVs and WAVs with hard-error diagnostics are skipped
+   * entirely — same filter the single-file path uses (the BandMate
+   * won't play them).
+   */
+  const handleImportAll = useCallback(async () => {
+    if (!sourceFolder || !draftSong || !editor.current) return;
+
+    let sourceFiles: AudioFileInfo[];
+    try {
+      sourceFiles = await listAudioFiles(sourceFolder);
+    } catch (e) {
+      void message(
+        `Couldn't read source folder: ${e instanceof Error ? e.message : String(e)}`,
+        { title: "Import all", kind: "error" },
+      );
+      return;
+    }
+
+    // Mirror the single-file path's filter: stereo and hard-error
+    // WAVs aren't usable on the BandMate, so skip silently. Sample-
+    // rate mismatches are NOT filtered — they're allowed (the row
+    // shows a rate-mismatch warning, same as today).
+    const usable = sourceFiles.filter((f) => {
+      if (f.kind === "wav") {
+        const isStereo = (f.wavInfo?.channels ?? 1) > 1;
+        const isHardError = f.diagnostic?.severity === "error";
+        return !isStereo && !isHardError;
+      }
+      return true;
+    });
+    if (usable.length === 0) return;
+
+    // Detect "already in song folder" by name. Best-effort listing
+    // — if the song folder can't be read for any reason we proceed
+    // without dedup (better to over-copy than to skip silently).
+    // Case-insensitive compare matches APFS default semantics.
+    let songFolderListing: AudioFileInfo[] = [];
+    try {
+      songFolderListing = await listAudioFiles(songFolder);
+    } catch {
+      songFolderListing = [];
+    }
+    const existingInSong = new Set(
+      songFolderListing.map((f) => f.filename.toLowerCase()),
+    );
+
+    // Split usable into "already there" vs "new". Files already in
+    // the song folder are skipped entirely from import-all — the
+    // user can manually re-import a single file if they want to
+    // overwrite (by clearing the song-folder copy first).
+    const alreadyInSong: AudioFileInfo[] = [];
+    const newImports: AudioFileInfo[] = [];
+    for (const f of usable) {
+      if (existingInSong.has(f.filename.toLowerCase())) {
+        alreadyInSong.push(f);
+      } else {
+        newImports.push(f);
+      }
+    }
+
+    // ---- Phase 1: fuzzy match each WAV to its best-scoring channel ----
+    //
+    // `bestChannelForFilename` tokenizes both the filename and each
+    // labeled channel, then scores how strongly the label applies.
+    // Returns null if no label scores above zero — those files fall
+    // through to direct-copy. The MIDI slot is excluded from audio
+    // matching; MIDI files are handled below by kind.
+    const skipMidi = new Set([MIDI_CHANNEL_INDEX]);
+    type Claim = { file: AudioFileInfo; score: number };
+    const claimsByChannel = new Map<number, Claim[]>();
+    const wavUnmatched: AudioFileInfo[] = [];
+
+    for (const file of newImports) {
+      if (file.kind !== "wav") continue;
+      const match = bestChannelForFilename(file.filename, labels, skipMidi);
+      if (!match) {
+        wavUnmatched.push(file);
+        continue;
+      }
+      const existing = claimsByChannel.get(match.channel) ?? [];
+      existing.push({ file, score: match.score });
+      claimsByChannel.set(match.channel, existing);
+    }
+
+    // ---- Tiebreaker: when multiple files want the same channel,
+    //      the file with the most recent mtime wins. Losers go to
+    //      the direct-copy bucket so they still end up in the song
+    //      folder (just not channel-assigned). modifiedSeconds is
+    //      nullable; treat null as -∞ so it always loses against a
+    //      real timestamp.
+    const winnerByChannel = new Map<number, AudioFileInfo>();
+    for (const [ch, claims] of claimsByChannel.entries()) {
+      if (claims.length === 1) {
+        winnerByChannel.set(ch, claims[0].file);
+        continue;
+      }
+      const sorted = [...claims].sort(
+        (a, b) =>
+          (b.file.modifiedSeconds ?? -Infinity) -
+          (a.file.modifiedSeconds ?? -Infinity),
+      );
+      winnerByChannel.set(ch, sorted[0].file);
+      for (let i = 1; i < sorted.length; i++) {
+        wavUnmatched.push(sorted[i].file);
+      }
+    }
+
+    // ---- A winning file can't claim a channel that's already
+    //      occupied by an existing assignment in the song. Those
+    //      winners get bumped to direct-copy (non-destructive: the
+    //      user's existing assignment is never overwritten).
+    const currentOccupied = new Set(
+      editor.current.song.audioFiles.map((a) => a.channel),
+    );
+    for (const [ch, file] of [...winnerByChannel.entries()]) {
+      if (currentOccupied.has(ch)) {
+        winnerByChannel.delete(ch);
+        wavUnmatched.push(file);
+      }
+    }
+
+    // ---- MIDI: if the slot is empty AND there are MIDI files,
+    //      pick the newest one. Any other MIDI files go to direct-
+    //      copy. If the slot is already occupied, ALL MIDI files
+    //      go to direct-copy.
+    const midiFiles = newImports.filter((f) => f.kind === "mid");
+    let midiWinner: AudioFileInfo | null = null;
+    if (midiFiles.length > 0 && !editor.current.song.midiFile) {
+      const sorted = [...midiFiles].sort(
+        (a, b) =>
+          (b.modifiedSeconds ?? -Infinity) -
+          (a.modifiedSeconds ?? -Infinity),
+      );
+      midiWinner = sorted[0];
+    }
+    const midiUnmatched = midiFiles.filter((f) => f !== midiWinner);
+
+    // ---- Final direct-copy bucket: WAVs that didn't match or lost
+    //      their channel claim, plus any MIDI overflow.
+    const directCopy: AudioFileInfo[] = [...wavUnmatched, ...midiUnmatched];
+
+    // ---- Commit channel assignments via applyEdit (one shot,
+    //      undoable). We've finalized the bucket assignment up-
+    //      front so the updater is a pure state transformation —
+    //      no logic that could re-run differently under StrictMode.
+    if (winnerByChannel.size > 0 || midiWinner) {
+      applyEdit((snap) => {
+        const nextAudio = [...snap.song.audioFiles];
+        let nextMidi = snap.song.midiFile;
+        const nextCopies = new Map(snap.pendingCopies);
+
+        for (const [ch, file] of winnerByChannel.entries()) {
+          nextAudio.push({
+            filename: file.filename,
+            channel: ch,
+            level: 1.0,
+            pan: 0.5,
+            mute: 1.0,
+          });
+          nextCopies.set(ch, {
+            sourcePath: file.path,
+            filename: file.filename,
+            sampleRate: file.wavInfo?.sampleRate ?? 0,
+            channels: file.wavInfo?.channels ?? 1,
+            durationSeconds: file.wavInfo?.durationSeconds ?? 0,
+          });
+        }
+
+        if (midiWinner && !nextMidi) {
+          nextMidi = {
+            filename: midiWinner.filename,
+            channel: MIDI_CHANNEL_INDEX,
+          };
+          nextCopies.set(MIDI_CHANNEL_INDEX, {
+            sourcePath: midiWinner.path,
+            filename: midiWinner.filename,
+            sampleRate: 0,
+            channels: 0,
+            durationSeconds: 0,
+          });
+        }
+
+        return {
+          song: {
+            ...snap.song,
+            audioFiles: nextAudio.sort((a, b) => a.channel - b.channel),
+            midiFile: nextMidi,
+          },
+          pendingCopies: nextCopies,
+        };
+      });
+    }
+
+    // ---- Direct-copy: persist immediately so files appear in the
+    //      Song Folder tab without waiting for Save. Per-file
+    //      errors are best-effort.
+    if (directCopy.length > 0) {
+      await Promise.all(
+        directCopy.map(async (file) => {
+          try {
+            await copyIntoFolder(file.path, songFolder);
+          } catch (e) {
+            // eslint-disable-next-line no-console
+            console.error(`Import-all: failed to copy ${file.filename}:`, e);
+          }
+        }),
+      );
+      setSongFolderRefreshKey((k) => k + 1);
+    }
+
+    // ---- Toast — communicate the outcome. We count anything that
+    //      entered the song's workflow as an "import": smart-
+    //      matched channel assignments (commit on Save), MIDI slot
+    //      assignment, and the directly-copied overflow files.
+    const matchedCount = winnerByChannel.size;
+    const midiAssignedCount = midiWinner ? 1 : 0;
+    const totalImported =
+      matchedCount + midiAssignedCount + directCopy.length;
+    if (totalImported > 0) {
+      setToastMessage(
+        `Imported ${totalImported} file${totalImported === 1 ? "" : "s"} into the song folder.`,
+      );
+    } else if (alreadyInSong.length > 0) {
+      setToastMessage(
+        `All ${alreadyInSong.length} source file${
+          alreadyInSong.length === 1 ? " is" : "s are"
+        } already in the song folder.`,
+      );
+    }
+  }, [sourceFolder, songFolder, draftSong, applyEdit, labels, editor]);
+
+  /**
    * "Clean up…" button on the Song Folder tab. Re-fetches the folder
    * listing fresh (rather than trusting cached `folderFiles`) so the
    * confirm dialog is built against on-disk truth at the moment the
@@ -1311,6 +1583,38 @@ export function SongEditor({ jcsPath }: Props) {
         handleSwapChannels(sel, sel + delta);
         return;
       }
+      // Plain Arrow Up/Down (no modifier) — move the row selection
+      // up/down through the channel grid. Only fires when a row is
+      // already selected; pressing arrows with no selection is a
+      // no-op (avoids surprise selection-from-nothing on stray
+      // keypresses). Stops at the boundaries — no wraparound.
+      // The MIDI slot at index 24 is included in the navigation
+      // since it renders as the last row in the grid.
+      if (
+        !meta &&
+        !e.altKey &&
+        !e.shiftKey &&
+        (e.key === "ArrowUp" || e.key === "ArrowDown")
+      ) {
+        const target = e.target as HTMLElement | null;
+        const tag = target?.tagName?.toLowerCase();
+        if (
+          tag === "input" ||
+          tag === "textarea" ||
+          tag === "select" ||
+          target?.isContentEditable
+        ) {
+          return;
+        }
+        const sel = state.channelSelection;
+        if (sel === null) return;
+        const delta = e.key === "ArrowUp" ? -1 : 1;
+        const next = sel + delta;
+        if (next < 0 || next > MIDI_CHANNEL_INDEX) return;
+        e.preventDefault();
+        dispatch({ type: "select_channel", channel: next });
+        return;
+      }
       // Delete / Backspace — clear selected channel's assignment
       if (e.key === "Delete" || e.key === "Backspace") {
         const target = e.target as HTMLElement | null;
@@ -1338,6 +1642,7 @@ export function SongEditor({ jcsPath }: Props) {
     undo,
     redo,
     state.channelSelection,
+    dispatch,
   ]);
 
   // ---- Render -------------------------------------------------------------
@@ -1455,6 +1760,7 @@ export function SongEditor({ jcsPath }: Props) {
           onChangeSourceFolder={(path) => handleChangeSourceFolder(path)}
           onClearSourceFolder={() => handleChangeSourceFolder(null)}
           onCleanupUnreferenced={() => void handleOpenCleanup()}
+          onImportAll={() => void handleImportAll()}
         />
       </div>
 
@@ -1537,6 +1843,13 @@ export function SongEditor({ jcsPath }: Props) {
         onConfirm={handleConfirmCleanup}
         onClose={() => setCleanupCandidates(null)}
       />
+
+      {toastMessage && (
+        <Toast
+          message={toastMessage}
+          onDismiss={() => setToastMessage(null)}
+        />
+      )}
     </main>
   );
 }
