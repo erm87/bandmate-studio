@@ -94,6 +94,14 @@ export interface AudioFileInfo {
    * metadata read failed.
    */
   modifiedSeconds: number | null;
+  /**
+   * File size in bytes (from `fs::metadata`). Surfaced in the
+   * per-song cleanup confirm dialog so the user can see roughly
+   * how much disk space the unreferenced files take up, and in the
+   * USB-export "Skipping N unused file(s) (~M MB)" summary. `null`
+   * if the metadata read failed.
+   */
+  sizeBytes: number | null;
 }
 
 export type Diagnostic =

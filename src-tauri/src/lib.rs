@@ -24,7 +24,8 @@
 //   - copy_to_usb: stream a working folder to a USB drive with progress
 //   - dot_clean: shell out to `dot_clean -m <path>` on macOS
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
@@ -313,6 +314,12 @@ pub struct AudioFileInfo {
     /// recent take when re-importing from a Logic export folder that
     /// accumulates multiple renders. `None` if `fs::metadata` failed.
     pub modified_seconds: Option<f64>,
+    /// File size in bytes. Surfaced in the per-song "Clean up
+    /// unreferenced files" confirm dialog (so the user can see how
+    /// much disk they'll free) and in the USB-export "Skipping N
+    /// unused file(s) (~M MB)" summary. `None` if `fs::metadata`
+    /// failed.
+    pub size_bytes: Option<u64>,
 }
 
 /// File-level diagnostic. We surface these in the source-files pane.
@@ -395,15 +402,16 @@ fn list_audio_files(folder: String) -> Result<Vec<AudioFileInfo>, String> {
             _ => None,
         };
 
-        // Last-modified time (Unix epoch seconds). The .duration_since
-        // can fail if mtime is before the epoch — extremely unusual,
-        // surfaces as None.
-        let modified_seconds = entry
-            .metadata()
-            .ok()
+        // Single metadata read covers both modified_seconds and
+        // size_bytes. The .duration_since can fail if mtime is before
+        // the epoch — extremely unusual, surfaces as None.
+        let metadata = entry.metadata().ok();
+        let modified_seconds = metadata
+            .as_ref()
             .and_then(|m| m.modified().ok())
             .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
             .map(|d| d.as_secs_f64());
+        let size_bytes = metadata.as_ref().map(|m| m.len());
 
         out.push(AudioFileInfo {
             filename,
@@ -414,6 +422,7 @@ fn list_audio_files(folder: String) -> Result<Vec<AudioFileInfo>, String> {
             is_midi_clean,
             duration_seconds,
             modified_seconds,
+            size_bytes,
         });
     }
 
@@ -933,6 +942,102 @@ fn delete_playlist(working_folder: String, jcp_path: String) -> Result<(), Strin
         return Err(format!("Not a .jcp file: {}", jcp_path));
     }
     fs::remove_file(target).map_err(|e| format!("Cannot delete playlist: {}", e))
+}
+
+/// Delete one or more audio/MIDI files from a song folder.
+///
+/// Used by the "Clean up unreferenced files" action on the Song
+/// Folder tab. The TS side already classifies which filenames are
+/// safe to delete (everything not in the song's .jcs `<file>` or
+/// `<midi_file>` references) and passes them here as basenames.
+///
+/// Path safety:
+///   - `song_folder` must live under
+///     `<working_folder>/bm_media/bm_sources/`. We refuse otherwise.
+///   - Each filename must be a bare basename (no `/`, no `\`, no
+///     `..`). The frontend never sends paths, but defending against
+///     traversal is cheap.
+///   - Each resolved path must still be inside the song folder
+///     after joining (belt + suspenders against the basename
+///     check above).
+///   - Only `.wav` and `.mid` files are deletable here. The .jcs
+///     file itself, the `.bandmate-studio.json` sidecar, and any
+///     hidden files are untouchable through this command — they
+///     fall outside the cleanup scope by design.
+///
+/// Returns the list of files that were actually deleted. On a per-
+/// file error we stop and return the error; partial success means
+/// the user can re-run the action against whatever remained.
+#[tauri::command]
+fn delete_files_in_song_folder(
+    working_folder: String,
+    song_folder: String,
+    filenames: Vec<String>,
+) -> Result<Vec<String>, String> {
+    let working = Path::new(&working_folder);
+    let target_dir = Path::new(&song_folder);
+    let expected_parent = working.join("bm_media").join("bm_sources");
+    if !target_dir.starts_with(&expected_parent) {
+        return Err(format!(
+            "Refusing to clean: '{}' is not inside bm_sources/.",
+            song_folder
+        ));
+    }
+    if !target_dir.is_dir() {
+        return Err(format!("Not a directory: {}", song_folder));
+    }
+
+    let mut deleted = Vec::with_capacity(filenames.len());
+    for raw_name in filenames {
+        let name = raw_name.trim();
+        if name.is_empty() {
+            return Err("Empty filename in delete list.".to_string());
+        }
+        if name.contains('/') || name.contains('\\') || name.contains('\0') {
+            return Err(format!("Invalid filename: '{}'", name));
+        }
+        if name.starts_with('.') {
+            return Err(format!(
+                "Refusing to delete dotfile '{}' via cleanup.",
+                name
+            ));
+        }
+        let path = target_dir.join(name);
+        // Re-confirm the resolved path stays inside the song folder.
+        // (canonicalize() is too eager here — it follows symlinks. The
+        // basename check above plus this prefix check are sufficient
+        // against a malicious frontend, which we don't have anyway.)
+        if !path.starts_with(target_dir) {
+            return Err(format!(
+                "Refusing to delete: '{}' escapes the song folder.",
+                name
+            ));
+        }
+        let ext_lower = path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|s| s.to_ascii_lowercase());
+        match ext_lower.as_deref() {
+            Some("wav") | Some("mid") => {}
+            _ => {
+                return Err(format!(
+                    "Refusing to delete '{}': only .wav and .mid files can be cleaned.",
+                    name
+                ));
+            }
+        }
+        if !path.is_file() {
+            // Already gone — treat as deleted and move on rather than
+            // erroring out partway through a batch.
+            deleted.push(name.to_string());
+            continue;
+        }
+        fs::remove_file(&path).map_err(|e| {
+            format!("Cannot delete '{}': {}", name, e)
+        })?;
+        deleted.push(name.to_string());
+    }
+    Ok(deleted)
 }
 
 /// Delete a single `.jcm` track-map file.
@@ -1461,9 +1566,60 @@ pub struct ExportSummary {
     pub dot_cleaned: bool,
 }
 
+/// If `src` is a song folder directly under `bm_sources_src` (i.e.
+/// `bm_sources_src/<some_song_name>`), look up the allow-set for that
+/// song in `filter`. Returns None if the path isn't a song folder or
+/// if no filter is active or if the song isn't in the filter map.
+///
+/// Used by both count_tree and copy_tree_with_progress to apply the
+/// "only copy referenced files" toggle. The filter map's keys are
+/// song folder names (basenames); its values are sets of allowed
+/// filenames pre-lowercased for case-insensitive matching.
+fn song_folder_filter<'a>(
+    src: &Path,
+    bm_sources_src: &Path,
+    filter: Option<&'a HashMap<String, HashSet<String>>>,
+) -> Option<&'a HashSet<String>> {
+    let filter = filter?;
+    let rel = src.strip_prefix(bm_sources_src).ok()?;
+    let mut components = rel.components();
+    let first = components.next()?;
+    // Exactly one component → this is `bm_sources/<song>` itself,
+    // not something deeper. Files inside the song folder are the
+    // direct iteration targets.
+    if components.next().is_some() {
+        return None;
+    }
+    let song_name = first.as_os_str().to_str()?;
+    filter.get(song_name)
+}
+
+/// Decide whether a media file (.wav / .mid) inside a filtered song
+/// folder should be included. Non-media files (.jcs, anything else)
+/// always include because the filter only governs audio/MIDI.
+fn passes_song_filter(name: &str, allowed: &HashSet<String>) -> bool {
+    let path = Path::new(name);
+    let ext_lower = path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_ascii_lowercase());
+    let is_media = matches!(ext_lower.as_deref(), Some("wav") | Some("mid"));
+    if !is_media {
+        // .jcs / unknown types always copy — the filter is media-only.
+        return true;
+    }
+    allowed.contains(&name.to_lowercase())
+}
+
 /// Recursively count files + bytes under `src` so we can compute
-/// progress percentages without re-walking.
-fn count_tree(src: &Path) -> std::io::Result<(u64, u64)> {
+/// progress percentages without re-walking. Applies the same
+/// `bm_sources` song-folder allow-list as the copy pass so the
+/// progress bar's "total" matches what actually gets copied.
+fn count_tree(
+    src: &Path,
+    bm_sources_src: &Path,
+    filter: Option<&HashMap<String, HashSet<String>>>,
+) -> std::io::Result<(u64, u64)> {
     let mut files = 0u64;
     let mut bytes = 0u64;
     if src.is_file() {
@@ -1474,11 +1630,12 @@ fn count_tree(src: &Path) -> std::io::Result<(u64, u64)> {
     if !src.is_dir() {
         return Ok((0, 0));
     }
+    let active_song_filter = song_folder_filter(src, bm_sources_src, filter);
     for entry in fs::read_dir(src)? {
         let entry = entry?;
         let kind = entry.file_type()?;
         if kind.is_dir() {
-            let (f, b) = count_tree(&entry.path())?;
+            let (f, b) = count_tree(&entry.path(), bm_sources_src, filter)?;
             files += f;
             bytes += b;
         } else if kind.is_file() {
@@ -1490,6 +1647,11 @@ fn count_tree(src: &Path) -> std::io::Result<(u64, u64)> {
             let name_str = name.to_string_lossy();
             if is_export_excluded(&name_str) {
                 continue;
+            }
+            if let Some(allowed) = active_song_filter {
+                if !passes_song_filter(&name_str, allowed) {
+                    continue;
+                }
             }
             files += 1;
             bytes += entry.metadata()?.len();
@@ -1522,6 +1684,8 @@ fn is_export_excluded(name: &str) -> bool {
 fn copy_tree_with_progress(
     src: &Path,
     dst: &Path,
+    bm_sources_src: &Path,
+    filter: Option<&HashMap<String, HashSet<String>>>,
     app: &tauri::AppHandle,
     files_copied: &mut u64,
     bytes_copied: &mut u64,
@@ -1529,6 +1693,7 @@ fn copy_tree_with_progress(
     total_bytes: u64,
 ) -> Result<(), String> {
     fs::create_dir_all(dst).map_err(|e| format!("Cannot create {:?}: {}", dst, e))?;
+    let active_song_filter = song_folder_filter(src, bm_sources_src, filter);
     for entry in fs::read_dir(src).map_err(|e| format!("Cannot read {:?}: {}", src, e))? {
         let entry = entry.map_err(|e| e.to_string())?;
         let kind = entry.file_type().map_err(|e| e.to_string())?;
@@ -1537,11 +1702,27 @@ fn copy_tree_with_progress(
         if is_export_excluded(&name_str) {
             continue;
         }
+        // Apply the "only referenced files" filter when we're inside
+        // a known song folder. Media (.wav / .mid) gets gated; .jcs and
+        // anything else always copies. See `passes_song_filter`.
+        if let Some(allowed) = active_song_filter {
+            if !passes_song_filter(&name_str, allowed) {
+                continue;
+            }
+        }
         let from = entry.path();
         let to = dst.join(&name);
         if kind.is_dir() {
             copy_tree_with_progress(
-                &from, &to, app, files_copied, bytes_copied, total_files, total_bytes,
+                &from,
+                &to,
+                bm_sources_src,
+                filter,
+                app,
+                files_copied,
+                bytes_copied,
+                total_files,
+                total_bytes,
             )?;
         } else if kind.is_file() {
             let size = entry.metadata().map_err(|e| e.to_string())?.len();
@@ -1590,6 +1771,24 @@ fn run_dot_clean(path: &Path) -> Result<bool, String> {
     }
 }
 
+/// Optional per-song include filter for `export_to_usb`. Each entry
+/// maps a song folder name (basename, e.g. "Diff_Test_A") to the
+/// list of media filenames (`.wav` / `.mid`) that should be copied.
+/// Filenames inside the song folder NOT listed here are skipped.
+///
+/// The TS side builds this when the `exportOnlyReferencedFiles` pref
+/// is on, by walking the scan + parsing each `.jcs` and collecting
+/// `<file>` + `<midi_file>` references. `.jcs` is always copied
+/// regardless; only audio/MIDI inside song folders is filtered.
+///
+/// Pass `None` (omit / null from JS) for full-copy behavior — the
+/// historical default.
+#[derive(Debug, Deserialize)]
+pub struct ExportIncludeFilter {
+    /// Map of song folder name → allowed media filenames.
+    pub songs: HashMap<String, Vec<String>>,
+}
+
 /// Copy `<working_folder>/bm_media/` to `<dest_path>/bm_media/`,
 /// emitting per-file progress events on the "export-progress"
 /// channel, and running `dot_clean -m <dest_path>` on macOS to strip
@@ -1598,11 +1797,18 @@ fn run_dot_clean(path: &Path) -> Result<bool, String> {
 /// `dest_path` is the USB mount point (or any folder); the user picks
 /// it via the native folder picker on the frontend before this is
 /// invoked.
+///
+/// `include_filter` is optional: when supplied, only files inside
+/// song folders that appear in its allow-list are copied. `.jcp`
+/// playlist files (at the `bm_sources/` root) and `.jcm` track
+/// maps (under `bm_trackmaps/`) ship regardless because they're
+/// definitions, not media.
 #[tauri::command]
 fn export_to_usb(
     app: tauri::AppHandle,
     working_folder: String,
     dest_path: String,
+    include_filter: Option<ExportIncludeFilter>,
 ) -> Result<ExportSummary, String> {
     let src = PathBuf::from(&working_folder).join("bm_media");
     let dst = PathBuf::from(&dest_path).join("bm_media");
@@ -1616,9 +1822,33 @@ fn export_to_usb(
         return Err(format!("Destination is not a directory: {}", dest_path));
     }
 
-    // Count first so we have totals for progress calculation.
+    // Lower-case the allow-list filenames once up front so the
+    // hot path (per-file check inside count/copy) is a single
+    // HashSet lookup, not a per-file lowercasing.
+    let lowered_filter: Option<HashMap<String, HashSet<String>>> =
+        include_filter.map(|f| {
+            f.songs
+                .into_iter()
+                .map(|(song, names)| {
+                    (
+                        song,
+                        names
+                            .into_iter()
+                            .map(|n| n.to_lowercase())
+                            .collect::<HashSet<String>>(),
+                    )
+                })
+                .collect()
+        });
+    let filter_ref = lowered_filter.as_ref();
+    let bm_sources_src = src.join("bm_sources");
+
+    // Count first so we have totals for progress calculation. With
+    // the filter active, totals reflect the filtered set so progress
+    // hits 100% at the end rather than stopping short.
     let (total_files, total_bytes) =
-        count_tree(&src).map_err(|e| format!("Cannot scan working folder: {}", e))?;
+        count_tree(&src, &bm_sources_src, filter_ref)
+            .map_err(|e| format!("Cannot scan working folder: {}", e))?;
 
     // Initial progress event so the dialog shows totals before any
     // file has been copied.
@@ -1638,6 +1868,8 @@ fn export_to_usb(
     copy_tree_with_progress(
         &src,
         &dst,
+        &bm_sources_src,
+        filter_ref,
         &app,
         &mut files_copied,
         &mut bytes_copied,
@@ -1735,6 +1967,7 @@ pub fn run() {
             delete_song,
             delete_playlist,
             delete_track_map,
+            delete_files_in_song_folder,
             duplicate_song,
             duplicate_playlist,
             duplicate_track_map,

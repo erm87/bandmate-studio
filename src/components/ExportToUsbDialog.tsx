@@ -21,6 +21,7 @@ import {
   exportToUsb,
   fileExists,
   subscribeExportProgress,
+  type ExportIncludeFilter,
   type ExportProgress,
   type ExportSummary,
 } from "../fs/workingFolder";
@@ -30,6 +31,12 @@ import {
   runPreExportValidation,
   type ExportFinding,
 } from "../lib/preExportValidation";
+import {
+  buildIncludeFilter,
+  computeSkipSummary,
+  formatExportBytes,
+  type SkipSummary,
+} from "../lib/exportFilter";
 
 interface Props {
   isOpen: boolean;
@@ -51,6 +58,19 @@ export function ExportToUsbDialog({ isOpen, onClose }: Props) {
   const [ejectError, setEjectError] = useState<string | null>(null);
   const [findings, setFindings] = useState<ExportFinding[] | null>(null);
   const [validating, setValidating] = useState(false);
+  /**
+   * Filter sent to the Rust export when `exportOnlyReferencedFiles`
+   * is on. `null` means full-copy (the historical behavior). Computed
+   * on dialog open in parallel with the playlist validation.
+   */
+  const [includeFilter, setIncludeFilter] =
+    useState<ExportIncludeFilter | null>(null);
+  /**
+   * Per-song skip totals + zero-files warnings, surfaced in the
+   * confirm step under the source/destination panel. `null` when
+   * the toggle is off or while we're still computing.
+   */
+  const [skipSummary, setSkipSummary] = useState<SkipSummary | null>(null);
 
   // Reset every time the dialog opens. Also subscribe to progress
   // events for the lifetime of the open dialog — listeners are cheap
@@ -73,13 +93,42 @@ export function ExportToUsbDialog({ isOpen, onClose }: Props) {
     setEjectError(null);
     setFindings(null);
     setValidating(true);
+    setIncludeFilter(null);
+    setSkipSummary(null);
 
-    // Run pre-export validation as soon as the dialog opens, in
-    // parallel with the user picking a destination — by the time
-    // they confirm, findings are usually ready.
-    void runPreExportValidation(state.scan)
-      .then((f) => setFindings(f))
-      .finally(() => setValidating(false));
+    // Run pre-export validation + (if the toggle is on) the include-
+    // filter build and skip-summary inspection. All in parallel — by
+    // the time the user clicks through to Confirm, totals are ready.
+    //
+    // The skip summary depends on the include filter being ready
+    // (it uses the same per-song allow-list to classify each folder's
+    // files), so we chain those two. Validation runs independently.
+    const wantsFilter = state.userPrefs.exportOnlyReferencedFiles;
+    void runPreExportValidation(state.scan).then((baseFindings) => {
+      // Zero-media warnings get folded into the same findings list
+      // shown in the confirm step's amber block — they're real
+      // export-time warnings.
+      if (!wantsFilter) {
+        setFindings(baseFindings);
+        setValidating(false);
+        return;
+      }
+      void buildIncludeFilter(state.scan).then(async (filter) => {
+        setIncludeFilter(filter);
+        const summary = await computeSkipSummary(state.scan, filter);
+        setSkipSummary(summary);
+        const zeroFindings: ExportFinding[] = summary.songsWithZeroFiles.map(
+          (songName) => ({
+            severity: "warning",
+            message: `Song "${songName}" has no media files referenced — it will export with audio missing.`,
+            detail:
+              "The .jcs still ships, but the BandMate won't have audio for this song. Open the song and assign files, or remove the song.",
+          }),
+        );
+        setFindings([...baseFindings, ...zeroFindings]);
+        setValidating(false);
+      });
+    });
 
     let unlisten: (() => void) | null = null;
     let cancelled = false;
@@ -140,6 +189,7 @@ export function ExportToUsbDialog({ isOpen, onClose }: Props) {
     state.scan,
     state.lastExportDestPath,
     state.userPrefs.defaultExportDestPath,
+    state.userPrefs.exportOnlyReferencedFiles,
     dispatch,
   ]);
 
@@ -169,7 +219,11 @@ export function ExportToUsbDialog({ isOpen, onClose }: Props) {
     setStep("copying");
     setProgress(null);
     try {
-      const result = await exportToUsb(workingFolder, destPath);
+      // includeFilter is non-null only when the user pref is on AND
+      // the buildIncludeFilter call already returned. If the user
+      // somehow clicks Start before the filter resolves, Rust will
+      // do a full-copy — acceptable fallback.
+      const result = await exportToUsb(workingFolder, destPath, includeFilter);
       setSummary(result);
       setStep("done");
       // Remember this destination for the rest of the session — next
@@ -239,6 +293,8 @@ export function ExportToUsbDialog({ isOpen, onClose }: Props) {
               destPath={destPath}
               findings={findings}
               validating={validating}
+              skipSummary={skipSummary}
+              filterOn={state.userPrefs.exportOnlyReferencedFiles}
               onChangeDest={() => void handlePickDest()}
               onStart={() => void handleStartExport()}
             />
@@ -316,6 +372,8 @@ function ConfirmStep({
   destPath,
   findings,
   validating,
+  skipSummary,
+  filterOn,
   onChangeDest,
   onStart,
 }: {
@@ -323,6 +381,13 @@ function ConfirmStep({
   destPath: string;
   findings: ExportFinding[] | null;
   validating: boolean;
+  /**
+   * Skip totals when the `exportOnlyReferencedFiles` pref is on. Null
+   * while computing OR when the pref is off (`filterOn` distinguishes).
+   */
+  skipSummary: SkipSummary | null;
+  /** Whether the "only referenced files" toggle is currently on. */
+  filterOn: boolean;
   onChangeDest: () => void;
   onStart: () => void;
 }) {
@@ -351,6 +416,31 @@ function ConfirmStep({
           </Button>
         </div>
       </div>
+
+      {/* "Only referenced files" filter status — neutral info, not a
+          warning. Shows the running skip total once computed. */}
+      {filterOn && (
+        <div className="rounded-md bg-zinc-50 px-3 py-2 text-xs text-zinc-600 dark:bg-zinc-950 dark:text-zinc-400">
+          <span className="eyebrow">Filter</span>
+          {skipSummary === null ? (
+            <p className="italic">
+              Computing which files are referenced…
+            </p>
+          ) : skipSummary.fileCount === 0 ? (
+            <p>
+              All files in song folders are referenced — nothing extra
+              to skip.
+            </p>
+          ) : (
+            <p>
+              Skipping {skipSummary.fileCount} unused file
+              {skipSummary.fileCount === 1 ? "" : "s"} (~
+              {formatExportBytes(skipSummary.byteCount)}) that no song's{" "}
+              <span className="font-mono">.jcs</span> references.
+            </p>
+          )}
+        </div>
+      )}
 
       {/* Pre-export findings. The export proceeds even with warnings —
           the user has explicit awareness via this section. */}
