@@ -24,12 +24,20 @@
  * Close: ESC, click on the backdrop, or the × button.
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { ask, open as openDialog } from "@tauri-apps/plugin-dialog";
 import { cn } from "../lib/cn";
 import { Button } from "./Button";
 import { cleanMidiFile, listAudioFiles } from "../fs/workingFolder";
 import { useAppState } from "../state/AppState";
+import { APP_PHASE, APP_PHASE_LABEL } from "../lib/appPhase";
+import {
+  parseChangelog,
+  parseInline,
+  type ChangelogEntry,
+  type InlineSegment,
+} from "../lib/changelog";
+import changelogSource from "../../CHANGELOG.md?raw";
 import type { ColorMode, DefaultSampleRate } from "../state/persistence";
 
 interface Props {
@@ -37,13 +45,14 @@ interface Props {
   onClose: () => void;
 }
 
-type SectionId = "appearance" | "defaults" | "midi" | "export";
+type SectionId = "appearance" | "defaults" | "midi" | "export" | "about";
 
 const SECTIONS: { id: SectionId; label: string }[] = [
   { id: "appearance", label: "Appearance" },
   { id: "defaults", label: "Defaults" },
   { id: "midi", label: "MIDI" },
   { id: "export", label: "Export" },
+  { id: "about", label: "About" },
 ];
 
 export function SettingsDialog({ isOpen, onClose }: Props) {
@@ -120,6 +129,7 @@ export function SettingsDialog({ isOpen, onClose }: Props) {
             {active === "defaults" && <DefaultsSection />}
             {active === "midi" && <MidiSection />}
             {active === "export" && <ExportSection />}
+            {active === "about" && <AboutSection />}
           </div>
         </div>
       </div>
@@ -668,6 +678,209 @@ function ExportSection() {
       </div>
     </section>
   );
+}
+
+/**
+ * About — version + lifecycle phase + bundled changelog.
+ *
+ * Version comes from the running binary via `@tauri-apps/api/app`'s
+ * `getVersion()` (which reads tauri.conf.json's `version` field at
+ * build time, not at runtime — so it accurately reflects what's
+ * installed, not what's currently in the repo).
+ *
+ * Phase is the constant in `src/lib/appPhase.ts` — flipped by hand
+ * when the criteria documented in docs/VERSIONING.md are met.
+ *
+ * Changelog is the project's CHANGELOG.md, imported as a raw string
+ * via Vite's `?raw` suffix at build time, parsed at module load, and
+ * rendered below the version line. The latest version is expanded
+ * by default; older versions are collapsed `<details>` elements so
+ * the panel stays compact while keeping full history a click away.
+ *
+ * Module-level parse: CHANGELOG.md doesn't change at runtime, so we
+ * parse once when the module loads. Filters out the `[Unreleased]`
+ * section since it isn't actually in any shipped build.
+ */
+const parsedChangelog: ChangelogEntry[] = parseChangelog(
+  changelogSource,
+).filter((e) => e.version.toLowerCase() !== "unreleased");
+
+function AboutSection() {
+  const [version, setVersion] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void import("@tauri-apps/api/app").then(({ getVersion }) => {
+      void getVersion().then((v) => {
+        if (!cancelled) setVersion(v);
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return (
+    <section className="flex flex-col gap-4">
+      <div className="flex flex-col gap-1">
+        <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+          BandMate Studio
+        </p>
+        <p className="text-xs text-zinc-500 dark:text-zinc-400">
+          Modern companion app for the JoeCo BandMate hardware.
+        </p>
+      </div>
+
+      <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1.5 text-xs">
+        <dt className="text-zinc-500 dark:text-zinc-500">Version</dt>
+        <dd className="user-text font-mono text-zinc-700 dark:text-zinc-300">
+          {version ?? "—"}
+        </dd>
+        <dt className="text-zinc-500 dark:text-zinc-500">Phase</dt>
+        <dd className="text-zinc-700 dark:text-zinc-300">
+          {APP_PHASE_LABEL[APP_PHASE]}
+        </dd>
+      </dl>
+
+      {parsedChangelog.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <p className="eyebrow">What's new</p>
+          <div className="flex flex-col gap-1">
+            {parsedChangelog.map((entry, idx) => (
+              <ChangelogEntryDetails
+                key={entry.version}
+                entry={entry}
+                // Expand the most-recent entry by default so the user
+                // sees what just shipped without an extra click.
+                defaultOpen={idx === 0}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      <p className="max-w-md text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
+        Versioning follows{" "}
+        <a
+          href="https://semver.org/"
+          target="_blank"
+          rel="noreferrer"
+          className="text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
+        >
+          semantic versioning
+        </a>
+        . See <span className="font-mono">docs/VERSIONING.md</span> in the
+        repository for phase criteria.
+      </p>
+    </section>
+  );
+}
+
+/**
+ * One version's entry as a collapsible `<details>` block. The
+ * summary shows version + date; the body renders the description,
+ * categories, and bullets with light inline-markdown formatting.
+ */
+function ChangelogEntryDetails({
+  entry,
+  defaultOpen,
+}: {
+  entry: ChangelogEntry;
+  defaultOpen: boolean;
+}) {
+  return (
+    <details
+      open={defaultOpen}
+      className="group rounded-md border border-zinc-200 bg-white open:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:open:bg-zinc-900/50"
+    >
+      <summary className="flex cursor-pointer items-baseline justify-between gap-3 rounded-md px-3 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-900">
+        <span className="font-mono font-medium text-zinc-900 dark:text-zinc-100">
+          {entry.version}
+        </span>
+        {entry.date && (
+          <span className="text-xs text-zinc-500 dark:text-zinc-500">
+            {entry.date}
+          </span>
+        )}
+      </summary>
+      <div className="flex flex-col gap-3 border-t border-zinc-200 px-3 py-2.5 text-xs dark:border-zinc-800">
+        {entry.description.map((para, i) => (
+          <p
+            key={`d-${i}`}
+            className="leading-relaxed text-zinc-700 dark:text-zinc-300"
+          >
+            {renderInline(parseInline(para))}
+          </p>
+        ))}
+        {entry.categories.map((cat) => (
+          <div key={cat.name} className="flex flex-col gap-1">
+            <p className="text-xs font-semibold uppercase tracking-wide text-zinc-600 dark:text-zinc-400">
+              {cat.name}
+            </p>
+            <ul className="flex flex-col gap-0.5">
+              {cat.items.map((item, i) =>
+                item.kind === "bullet" ? (
+                  <li
+                    key={`b-${i}`}
+                    className="ml-4 list-disc leading-snug text-zinc-700 marker:text-zinc-400 dark:text-zinc-300 dark:marker:text-zinc-600"
+                  >
+                    {renderInline(parseInline(item.text))}
+                  </li>
+                ) : (
+                  <li
+                    key={`s-${i}`}
+                    className="mt-1 list-none text-xs font-medium text-zinc-800 dark:text-zinc-200"
+                  >
+                    {item.text}
+                  </li>
+                ),
+              )}
+            </ul>
+          </div>
+        ))}
+      </div>
+    </details>
+  );
+}
+
+/**
+ * Convert parsed inline markdown segments into React nodes. Three
+ * formatting flavors are supported (bold, code, link); everything
+ * else is plain text.
+ */
+function renderInline(segments: InlineSegment[]): ReactNode[] {
+  return segments.map((seg, i) => {
+    switch (seg.kind) {
+      case "text":
+        return <span key={i}>{seg.text}</span>;
+      case "bold":
+        return (
+          <strong key={i} className="font-semibold">
+            {seg.text}
+          </strong>
+        );
+      case "code":
+        return (
+          <code
+            key={i}
+            className="rounded bg-zinc-100 px-1 py-0.5 font-mono text-[0.9em] text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
+          >
+            {seg.text}
+          </code>
+        );
+      case "link":
+        return (
+          <a
+            key={i}
+            href={seg.href}
+            target="_blank"
+            rel="noreferrer"
+            className="text-brand-600 hover:text-brand-700 dark:text-brand-400 dark:hover:text-brand-300"
+          >
+            {seg.text}
+          </a>
+        );
+    }
+  });
 }
 
 /**

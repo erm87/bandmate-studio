@@ -6,6 +6,27 @@ Newest entries on top.
 
 ---
 
+## Source Folder tab — manual refresh button
+
+**Where:** `SourceFilesPane.tsx` — `SourceFolderHeaderActions` (the Import all / Clear / Change… row).
+
+**Idea:** Add a small tertiary "Refresh" button alongside Clear / Change… that re-runs `listAudioFiles(sourceFolder)` against the existing source folder. Today the only ways to pick up newly-exported files (e.g., a fresh Logic bounce dropped into the source folder mid-session) are to Clear + re-Change to the same folder, or restart the app. Either is friction.
+
+**Why:** This is the most-common live workflow — open BMS, pick the Logic export folder once, then iterate on bounces in Logic. The user shouldn't have to round-trip through the folder picker just to see what they just exported.
+
+**Implementation notes:**
+- Re-uses the existing refresh primitive: `FolderView` already accepts a `refreshKey` prop that bumps re-list when incremented. The Song Folder tab uses this for post-save / post-clean refresh (`songFolderRefreshKey` in `SongEditor`). Add a sibling counter for the source-folder tab.
+- Or simpler: lift `FolderView`'s `refreshKey` to `SourceFilesPane` for the source tab too, and the new button bumps it directly.
+- The module-level `folderListCache` in `SourceFilesPane.tsx` is refreshed automatically by the existing fetch path — no special invalidation needed.
+- Button style: tertiary xs (matches Clear / Change… chrome). Refresh-arrow icon — `WorkingFolderBar.tsx`'s working-folder refresh IconButton has a usable glyph already; lift it into a shared icon module if reused.
+- Bonus: also bump `sourceFolderFiles` state in `SourceFilesPane` so the Import all button's disabled state updates correctly after refresh (the `onFilesLoaded` callback already wires this — it'll fire on the bumped re-list).
+
+**UX note:** consider whether to ALSO auto-refresh on window focus. A "user just came back from Logic, files appeared" workflow could be served without a button at all by listening for `visibilitychange` / `focus` and revalidating in the background. The button is the discoverable mechanism; window-focus auto-refresh is the polish layer on top. Probably ship the button first.
+
+**Captured:** 2026-05-13
+
+---
+
 ## Editor pane — structural refactor (if View Transitions alone isn't enough)
 
 **Status (2026-05-12):** the View Transitions spike has shipped (see `src/lib/viewTransition.ts` + `EditorPane.tsx`'s `view-transition-name: editor-pane`). The browser now crossfades the editor pane on selection change instead of hard-cutting. This may be the whole win — only pick up this entry if VT alone still feels "popping" on async data load (the new editor mounts in a brief loading state which the crossfade captures as its "after" frame).
