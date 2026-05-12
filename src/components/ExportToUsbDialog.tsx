@@ -25,7 +25,7 @@ import {
   type ExportSummary,
 } from "../fs/workingFolder";
 import { useAppState } from "../state/AppState";
-import { cn } from "../lib/cn";
+import { Button } from "./Button";
 import {
   runPreExportValidation,
   type ExportFinding,
@@ -267,13 +267,9 @@ export function ExportToUsbDialog({ isOpen, onClose }: Props) {
 
         {step !== "copying" && step !== "done" && (
           <footer className="flex items-center justify-end gap-2 border-t border-zinc-200 px-5 py-3 dark:border-zinc-800">
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-md px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 dark:text-zinc-300 dark:hover:bg-zinc-800"
-            >
+            <Button variant="ghost" onClick={onClose}>
               {step === "error" ? "Close" : "Cancel"}
-            </button>
+            </Button>
           </footer>
         )}
       </div>
@@ -308,19 +304,9 @@ function PickStep({
           </p>
         </div>
       </div>
-      <button
-        type="button"
-        onClick={onPick}
-        disabled={!workingFolder}
-        className={cn(
-          "rounded-md px-3 py-2 text-sm font-medium transition focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400",
-          workingFolder
-            ? "bg-brand-500 text-white hover:bg-brand-600"
-            : "cursor-not-allowed bg-zinc-100 text-zinc-400 dark:bg-zinc-800 dark:text-zinc-500",
-        )}
-      >
+      <Button onClick={onPick} disabled={!workingFolder}>
         Choose USB drive…
-      </button>
+      </Button>
     </>
   );
 }
@@ -356,13 +342,13 @@ function ConfirmStep({
             </span>
             <p className="user-text truncate font-mono">{destPath}</p>
           </div>
-          <button
-            type="button"
+          <Button
+            variant="tertiary"
             onClick={onChangeDest}
-            className="shrink-0 self-end rounded-md border border-zinc-200 bg-white px-2 py-1 text-meta font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+            className="shrink-0 self-end"
           >
             Change
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -408,13 +394,7 @@ function ConfirmStep({
         <span className="font-mono">._*</span>) is stripped after the copy
         via <span className="font-mono">dot_clean</span>.
       </p>
-      <button
-        type="button"
-        onClick={onStart}
-        className="rounded-md bg-brand-500 px-3 py-2 text-sm font-medium text-white transition hover:bg-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2"
-      >
-        Start export
-      </button>
+      <Button onClick={onStart}>Start export</Button>
     </>
   );
 }
@@ -508,21 +488,12 @@ function DoneStep({
         </p>
       )}
       <div className="flex items-center justify-end gap-2 pt-1">
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded-md px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 dark:text-zinc-300 dark:hover:bg-zinc-800"
-        >
+        <Button variant="ghost" onClick={onClose}>
           Done
-        </button>
-        <button
-          type="button"
-          onClick={onEject}
-          disabled={ejecting}
-          className="rounded-md bg-brand-500 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2 disabled:opacity-50"
-        >
+        </Button>
+        <Button onClick={onEject} disabled={ejecting}>
           {ejecting ? "Ejecting…" : "Eject drive"}
-        </button>
+        </Button>
       </div>
     </>
   );
@@ -543,20 +514,10 @@ function ErrorStep({
         Export failed: {errorMsg ?? "unknown error"}
       </p>
       <div className="flex items-center justify-end gap-2">
-        <button
-          type="button"
-          onClick={onClose}
-          className="rounded-md px-3 py-1.5 text-sm font-medium text-zinc-700 hover:bg-zinc-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 dark:text-zinc-300 dark:hover:bg-zinc-800"
-        >
+        <Button variant="ghost" onClick={onClose}>
           Close
-        </button>
-        <button
-          type="button"
-          onClick={onRetry}
-          className="rounded-md bg-brand-500 px-3 py-1.5 text-sm font-medium text-white transition hover:bg-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2"
-        >
-          Retry
-        </button>
+        </Button>
+        <Button onClick={onRetry}>Retry</Button>
       </div>
     </>
   );

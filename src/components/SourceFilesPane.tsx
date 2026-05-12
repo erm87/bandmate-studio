@@ -29,6 +29,7 @@ import { listAudioFiles, revealInFileManager } from "../fs/workingFolder";
 import type { AudioFileInfo } from "../fs/types";
 import { cn } from "../lib/cn";
 import { setDragImageLabel, setDragPayload } from "../lib/dnd";
+import { Button } from "./Button";
 import { ContextMenu, type OpenContextMenu } from "./ContextMenu";
 
 type Tab = "song" | "source";
@@ -405,22 +406,18 @@ function SourceFolderHeaderActions({
   onClear: () => void;
 }) {
   return (
-    <div className="flex items-center gap-1">
-      <button
-        type="button"
+    <div className="flex items-center gap-2">
+      <Button
+        variant="tertiary"
+        size="xs"
         onClick={onClear}
         title="Stop using this source folder for the song"
-        className="rounded-md border border-zinc-200 bg-white px-2 py-1 text-xs font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400 dark:hover:bg-zinc-900"
       >
         Clear
-      </button>
-      <button
-        type="button"
-        onClick={onChange}
-        className="rounded-md border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-900"
-      >
+      </Button>
+      <Button variant="tertiary" size="xs" onClick={onChange}>
         Change…
-      </button>
+      </Button>
     </div>
   );
 }
@@ -447,13 +444,7 @@ function SourceFolderEmptyState({ onPick }: { onPick: () => void }) {
         <strong>song folder</strong> when you save. Pointing at the right
         folder once means the next bounce just shows up here.
       </p>
-      <button
-        type="button"
-        onClick={onPick}
-        className="rounded-md bg-brand-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-brand-600 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-2"
-      >
-        Choose folder…
-      </button>
+      <Button onClick={onPick}>Choose folder…</Button>
     </div>
   );
 }

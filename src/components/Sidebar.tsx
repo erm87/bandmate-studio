@@ -677,7 +677,7 @@ export function Sidebar() {
           }
         >
           {songs.length === 0 ? (
-            <SectionEmpty hint="Use “+ New Song” above to add one." />
+            <SectionEmpty hint="Hit the + button above to add a new song." />
           ) : (
             songs.map((s) => {
               const isActive =
@@ -732,7 +732,7 @@ export function Sidebar() {
           }
         >
           {playlists.length === 0 ? (
-            <SectionEmpty hint="Use “+ New Playlist” above to build one from your songs." />
+            <SectionEmpty hint="Hit the + button above to create a new playlist." />
           ) : (
             playlists.map((p) => {
               const isActive =
@@ -801,7 +801,7 @@ export function Sidebar() {
           }
         >
           {trackMaps.length === 0 ? (
-            <SectionEmpty hint="Use “+ New Track Map” above to name your output channels." />
+            <SectionEmpty hint="Hit the + button above to name your output channels." />
           ) : (
             // Split into seeded (default_tm, stems_tm) + user-created.
             // Seeded renders first with a "Template" badge so it reads
