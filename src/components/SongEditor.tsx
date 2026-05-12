@@ -40,6 +40,7 @@ import { TRACK_MAP_CHANNEL_COUNT, MIDI_CHANNEL_INDEX } from "../codec";
 import {
   cleanMidiFile,
   copyIntoFolder,
+  deleteFilesInSongFolder,
   duplicateSong,
   listAudioFiles,
   readSongSidecar,
@@ -47,11 +48,12 @@ import {
   writeSongSidecar,
   writeTextFile,
 } from "../fs/workingFolder";
-import { suggestDuplicateName } from "../lib/references";
+import { classifySongFolderFiles, suggestDuplicateName } from "../lib/references";
 import { diffSongs } from "../lib/snapshotDiff";
 import type { AudioFileInfo } from "../fs/types";
 import { useAppState } from "../state/AppState";
 import { ChannelGrid } from "./ChannelGrid";
+import { CleanupConfirmDialog } from "./CleanupConfirmDialog";
 import { SaveConfirmDialog } from "./SaveConfirmDialog";
 import { SongHeader } from "./SongHeader";
 import { SourceFilesPane } from "./SourceFilesPane";
@@ -297,6 +299,18 @@ export function SongEditor({ jcsPath }: Props) {
    * folder instead.
    */
   const [sourceFolder, setSourceFolder] = useState<string | null>(null);
+  /**
+   * Cleanup confirm dialog state. `null` = closed. When set, holds the
+   * filenames pulled in at click time so the user sees a stable list
+   * even if a background refresh changes `folderFiles` mid-dialog.
+   *
+   * We snapshot the unreferenced list at button-click time rather than
+   * computing it inside the dialog so a parallel file-list refresh
+   * can't shift items out from under the confirmation.
+   */
+  const [cleanupCandidates, setCleanupCandidates] = useState<
+    AudioFileInfo[] | null
+  >(null);
 
   const draftSong = editor.current?.song ?? null;
 
@@ -952,6 +966,52 @@ export function SongEditor({ jcsPath }: Props) {
     [updateSidecar],
   );
 
+  /**
+   * "Clean up…" button on the Song Folder tab. Re-fetches the folder
+   * listing fresh (rather than trusting cached `folderFiles`) so the
+   * confirm dialog is built against on-disk truth at the moment the
+   * user clicked. The dialog itself handles the empty case
+   * gracefully — we always open it on click, never silently no-op.
+   */
+  const handleOpenCleanup = useCallback(async () => {
+    if (!draftSong) return;
+    try {
+      const files = await listAudioFiles(songFolder);
+      const { unreferenced } = classifySongFolderFiles(draftSong, files);
+      setCleanupCandidates(unreferenced);
+    } catch (e) {
+      // Open the dialog with an empty list so the user gets a clear
+      // "nothing to clean up" state; surface the underlying error
+      // via console for diagnosis.
+      // eslint-disable-next-line no-console
+      console.error("listAudioFiles failed before cleanup:", e);
+      setCleanupCandidates([]);
+    }
+  }, [draftSong, songFolder]);
+
+  /**
+   * Confirm handler — actually deletes the files, then refreshes the
+   * Song Folder tab so the list reflects the post-delete state.
+   * Errors propagate to the dialog (it surfaces them inline and
+   * stays open so the user can retry).
+   */
+  const handleConfirmCleanup = useCallback(
+    async (filenames: string[]) => {
+      if (!state.workingFolder) {
+        throw new Error("No working folder selected.");
+      }
+      await deleteFilesInSongFolder(
+        state.workingFolder,
+        songFolder,
+        filenames,
+      );
+      // Bump the Song Folder tab so it re-lists. Same mechanism the
+      // post-save / manual-MIDI-clean paths already use.
+      setSongFolderRefreshKey((k) => k + 1);
+    },
+    [songFolder, state.workingFolder],
+  );
+
   const handleClearChannel = useCallback(() => {
     const channel = state.channelSelection;
     if (channel === null) return;
@@ -1394,6 +1454,7 @@ export function SongEditor({ jcsPath }: Props) {
           onSelectFile={handleSelectSourceFile}
           onChangeSourceFolder={(path) => handleChangeSourceFolder(path)}
           onClearSourceFolder={() => handleChangeSourceFolder(null)}
+          onCleanupUnreferenced={() => void handleOpenCleanup()}
         />
       </div>
 
@@ -1467,6 +1528,14 @@ export function SongEditor({ jcsPath }: Props) {
         onSave={performSave}
         onSaveAs={performSaveAs}
         onClose={() => setSaveDialogOpen(false)}
+      />
+
+      <CleanupConfirmDialog
+        isOpen={cleanupCandidates !== null}
+        songName={songName}
+        files={cleanupCandidates ?? []}
+        onConfirm={handleConfirmCleanup}
+        onClose={() => setCleanupCandidates(null)}
       />
     </main>
   );

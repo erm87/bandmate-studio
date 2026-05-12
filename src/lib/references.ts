@@ -13,7 +13,8 @@
 
 import { parsePlaylist } from "../codec";
 import { readTextFile } from "../fs/workingFolder";
-import type { PlaylistSummary } from "../fs/types";
+import type { AudioFileInfo, PlaylistSummary } from "../fs/types";
+import type { Song } from "../codec/types";
 
 /**
  * Inbound references to a song or track map. Each entry is a
@@ -100,4 +101,53 @@ export function suggestDuplicateName(
     if (!existing.has(candidate)) return candidate;
   }
   return `${base} copy ${Math.floor(Math.random() * 10000)}`;
+}
+
+/**
+ * Partition the audio + MIDI files in a song folder into those
+ * referenced by the song's `.jcs` and those not.
+ *
+ * "Referenced" means the filename appears in `song.audioFiles[].filename`
+ * (a WAV channel assignment) or `song.midiFile.filename` (the single
+ * MIDI track). Comparison is case-insensitive so APFS-stored filenames
+ * (which compare case-insensitively by default on macOS) match the
+ * codec's stored values regardless of typing case.
+ *
+ * Non-audio / non-MIDI entries (`kind` other than "wav" or "mid")
+ * fall into `unreferenced` — the caller decides what to do with them.
+ * For the cleanup feature we only delete `.wav` / `.mid` so this is
+ * filtered at the call site; for the export filter, only `.wav` /
+ * `.mid` ever live in song folders anyway.
+ *
+ * Both features share this primitive: per-song cleanup deletes
+ * `unreferenced`; the USB export filter keeps only `referenced`
+ * accumulated across every song.
+ */
+export interface SongFolderClassification {
+  referenced: AudioFileInfo[];
+  unreferenced: AudioFileInfo[];
+}
+
+export function classifySongFolderFiles(
+  song: Song,
+  files: AudioFileInfo[],
+): SongFolderClassification {
+  const wavRefs = new Set(
+    song.audioFiles.map((f) => f.filename.toLowerCase()),
+  );
+  const midiRef = song.midiFile?.filename.toLowerCase() ?? null;
+
+  const referenced: AudioFileInfo[] = [];
+  const unreferenced: AudioFileInfo[] = [];
+  for (const f of files) {
+    const lower = f.filename.toLowerCase();
+    if (f.kind === "wav" && wavRefs.has(lower)) {
+      referenced.push(f);
+    } else if (f.kind === "mid" && midiRef !== null && lower === midiRef) {
+      referenced.push(f);
+    } else {
+      unreferenced.push(f);
+    }
+  }
+  return { referenced, unreferenced };
 }

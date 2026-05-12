@@ -1,21 +1,21 @@
 /**
  * Import Track Map dialog.
  *
- * Two entry points feed this one component:
+ * Triggered from the Sidebar's "+ New Track Map" menu under "Import
+ * from another folder…". The dialog immediately triggers the OS folder
+ * picker; once a folder is chosen we scan it via
+ * `list_track_maps_in_folder` and render a pickable list. The user
+ * checks the files they want, resolves any name collisions inline,
+ * and clicks Import.
  *
- *   1. Menu-driven — opened from the Sidebar's "+ New Track Map" menu
- *      with no `prepopulated` files. The dialog immediately triggers the
- *      OS folder picker; once a folder is chosen we scan it via
- *      `list_track_maps_in_folder` and render a pickable list. The user
- *      checks the files they want, resolves any name collisions inline,
- *      and clicks Import.
+ * Cross-platform note: an earlier version also supported a drag-drop
+ * entry point with a `prepopulated` prop, but Tauri 2's
+ * dragDropEnabled toggle forces a binary choice — file-paths-from-OS
+ * OR HTML5 internal dnd — and the editor relies heavily on the
+ * latter. Drag-drop entry was removed; the folder-pick flow is the
+ * sole cross-platform-safe import path.
  *
- *   2. Drag-and-drop — Sidebar detects `.jcm` files dropped onto the
- *      Track Maps section and opens this dialog with `prepopulated` set
- *      to the dropped files. The folder-pick step is skipped — we jump
- *      straight to collision resolution (if any), then import.
- *
- * Collision policy (matches the design discussion 2026-05-11):
+ * Collision policy:
  *   - Per-file inline resolver with three modes: Overwrite, Rename,
  *     Skip.
  *   - Default mode is "Rename" with an auto-suggested name —
@@ -23,9 +23,6 @@
  *     an existing file accidentally.
  *   - The Import button is disabled while any selected file has an
  *     unresolved (invalid) rename input.
- *
- * Single-file no-collision drag-drop bypasses this dialog entirely; the
- * Sidebar imports directly. See `Sidebar.handleDropTrackMaps`.
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -55,12 +52,6 @@ interface PerFileState {
 interface Props {
   isOpen: boolean;
   onClose: () => void;
-  /**
-   * If set, the dialog skips the folder-pick step and uses these files
-   * as the candidate import list. Set when the user drags .jcm files
-   * onto the Sidebar.
-   */
-  prepopulated?: RemoteTrackMap[] | null;
 }
 
 /**
@@ -125,11 +116,7 @@ function formatModified(seconds: number | null): string {
   });
 }
 
-export function ImportTrackMapDialog({
-  isOpen,
-  onClose,
-  prepopulated,
-}: Props) {
+export function ImportTrackMapDialog({ isOpen, onClose }: Props) {
   const { state, rescan, dispatch } = useAppState();
 
   // ----- Source selection / scan state -------------------------------------
@@ -182,11 +169,14 @@ export function ImportTrackMapDialog({
     }
   }, [sourceFolder, onClose]);
 
-  // ---- Open / reset / drag-drop pre-population ---------------------------
+  // ---- Open / reset -----------------------------------------------------
 
   // Tracks whether the auto folder-pick has been fired for the current
-  // open. Strict-Mode double-invocation in dev would otherwise prompt
-  // the OS picker twice on a single open.
+  // open. React StrictMode double-invokes effects in dev — without
+  // this guard, the OS picker would pop twice on a single open.
+  // A ref (not useState) is required because state updates don't
+  // flush between StrictMode's two effect invocations, so a state
+  // flag would still read as false on the second run.
   const autoPickedRef = useRef(false);
 
   useEffect(() => {
@@ -194,22 +184,10 @@ export function ImportTrackMapDialog({
       autoPickedRef.current = false;
       return;
     }
-    // Reset on every open.
+    // Reset on every open + auto-trigger the folder picker once.
     setScanError(null);
     setImportError(null);
     setImporting(false);
-
-    if (prepopulated && prepopulated.length > 0) {
-      // Drag-drop entry point: skip folder pick, jump straight to the list.
-      setSourceFolder(null);
-      setAvailable(prepopulated);
-      setSelected(new Set(prepopulated.map((m) => m.filename)));
-      setPerFile(new Map());
-      autoPickedRef.current = true;
-      return;
-    }
-
-    // Menu entry point: clear state then auto-trigger folder picker once.
     setSourceFolder(null);
     setAvailable([]);
     setSelected(new Set());
@@ -218,7 +196,7 @@ export function ImportTrackMapDialog({
       autoPickedRef.current = true;
       void pickSourceFolder();
     }
-  }, [isOpen, prepopulated, pickSourceFolder]);
+  }, [isOpen, pickSourceFolder]);
 
   // ---- Collision setup on selection change -------------------------------
 
@@ -402,23 +380,21 @@ export function ImportTrackMapDialog({
         </header>
 
         <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-5 py-4">
-          {/* Source folder line + change link (only for menu entry point) */}
-          {!prepopulated && (
-            <div className="flex items-baseline justify-between gap-2">
-              <span className="eyebrow">Source folder</span>
-              {sourceFolder && (
-                <button
-                  type="button"
-                  onClick={() => void pickSourceFolder()}
-                  disabled={scanning || importing}
-                  className="text-xs font-medium text-brand-600 hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 disabled:opacity-50 dark:text-brand-400 dark:hover:text-brand-300"
-                >
-                  Change…
-                </button>
-              )}
-            </div>
-          )}
-          {!prepopulated && sourceFolder && (
+          {/* Source folder line + change link. */}
+          <div className="flex items-baseline justify-between gap-2">
+            <span className="eyebrow">Source folder</span>
+            {sourceFolder && (
+              <button
+                type="button"
+                onClick={() => void pickSourceFolder()}
+                disabled={scanning || importing}
+                className="text-xs font-medium text-brand-600 hover:text-brand-700 focus:outline-none focus-visible:ring-2 focus-visible:ring-accent-400 disabled:opacity-50 dark:text-brand-400 dark:hover:text-brand-300"
+              >
+                Change…
+              </button>
+            )}
+          </div>
+          {sourceFolder && (
             <p
               className="truncate text-xs text-zinc-600 dark:text-zinc-400"
               title={sourceFolder}

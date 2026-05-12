@@ -73,6 +73,14 @@ interface Props {
    * doesn't need it — source files are never modified by us.
    */
   songFolderRefreshKey?: number;
+  /**
+   * Triggered by the "Clean up…" button in the Song Folder tab header.
+   * Parent computes the unreferenced file list against the current
+   * `.jcs` and opens a confirm dialog. Required when the editor has
+   * a parsed song; pass `null` to suppress the button (e.g. before
+   * the song has finished loading).
+   */
+  onCleanupUnreferenced?: (() => void) | null;
 }
 
 export function SourceFilesPane({
@@ -84,6 +92,7 @@ export function SourceFilesPane({
   onChangeSourceFolder,
   onClearSourceFolder,
   songFolderRefreshKey,
+  onCleanupUnreferenced,
 }: Props) {
   // Default to whichever tab is more useful: source if one's set, else
   // song folder. The pane remounts per song (SongEditor uses a `key`),
@@ -116,8 +125,18 @@ export function SourceFilesPane({
           songSampleRate={songSampleRate}
           channelSelected={channelSelected}
           onSelectFile={onSelectFile}
-          // Song folder is fixed to the song; no folder picker.
-          headerAction={null}
+          headerAction={
+            onCleanupUnreferenced ? (
+              <Button
+                variant="tertiary"
+                size="xs"
+                onClick={onCleanupUnreferenced}
+                title="Delete audio / MIDI files in this song folder that aren't referenced by the .jcs"
+              >
+                Clean up…
+              </Button>
+            ) : null
+          }
           emptyHint={
             <>
               Empty for now. Switch to the <strong>Source Folder</strong> tab to

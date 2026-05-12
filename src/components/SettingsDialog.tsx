@@ -37,12 +37,13 @@ interface Props {
   onClose: () => void;
 }
 
-type SectionId = "appearance" | "defaults" | "midi";
+type SectionId = "appearance" | "defaults" | "midi" | "export";
 
 const SECTIONS: { id: SectionId; label: string }[] = [
   { id: "appearance", label: "Appearance" },
   { id: "defaults", label: "Defaults" },
   { id: "midi", label: "MIDI" },
+  { id: "export", label: "Export" },
 ];
 
 export function SettingsDialog({ isOpen, onClose }: Props) {
@@ -118,6 +119,7 @@ export function SettingsDialog({ isOpen, onClose }: Props) {
             {active === "appearance" && <AppearanceSection />}
             {active === "defaults" && <DefaultsSection />}
             {active === "midi" && <MidiSection />}
+            {active === "export" && <ExportSection />}
           </div>
         </div>
       </div>
@@ -611,6 +613,59 @@ function MidiSection() {
           {status}
         </p>
       )}
+    </section>
+  );
+}
+
+/**
+ * USB export — currently one toggle, `exportOnlyReferencedFiles`.
+ *
+ * When on, the USB export only copies audio / MIDI files that are
+ * referenced by at least one song's `.jcs`. Useful when song folders
+ * have accumulated unused renders from earlier Logic exports and the
+ * BandMate stick is space-constrained or the user wants a clean
+ * shipping copy. Default is off — the live-rig reliability principle
+ * says we don't quietly change export semantics. The working folder
+ * stays the user's archive; the toggle changes only what gets
+ * shipped to USB.
+ *
+ * No retroactive prompt here (unlike the MIDI section's clean-now
+ * offer) — the toggle takes effect at the next export, and a
+ * separate per-song "Clean up" affordance lives in the Song Folder
+ * tab for users who want to delete unreferenced files from the
+ * working folder itself.
+ */
+function ExportSection() {
+  const { state, setUserPrefs } = useAppState();
+  const enabled = state.userPrefs.exportOnlyReferencedFiles;
+  return (
+    <section className="flex flex-col gap-4">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-col gap-1">
+          <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+            Only export referenced files
+          </p>
+          <p className="max-w-md text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
+            When on, USB export skips audio / MIDI files in your song
+            folders that aren't referenced by any song's{" "}
+            <span className="font-mono">.jcs</span>. Saves space and
+            time on USB writes when song folders accumulate unused
+            takes. Your working folder stays as the full archive;
+            only the USB stick gets the trimmed set.{" "}
+            <span className="font-mono">.jcs</span>,{" "}
+            <span className="font-mono">.jcp</span>, and{" "}
+            <span className="font-mono">.jcm</span> files always ship.
+          </p>
+        </div>
+        <ToggleSwitch
+          isOn={enabled}
+          disabled={false}
+          onToggle={() =>
+            setUserPrefs({ exportOnlyReferencedFiles: !enabled })
+          }
+          ariaLabel="Only export referenced files"
+        />
+      </div>
     </section>
   );
 }

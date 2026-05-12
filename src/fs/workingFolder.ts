@@ -160,11 +160,32 @@ export interface ExportSummary {
  * event API before calling this (see `subscribeExportProgress`) so
  * the dialog can update in real time.
  */
+/**
+ * Optional include-filter for `exportToUsb`. Maps a song folder name
+ * (basename, e.g. "Diff_Test_A") to the list of media filenames
+ * (`.wav` / `.mid`) that should ship to the USB. Files inside the
+ * song folder NOT in the list are skipped during export.
+ *
+ * `.jcs` files always ship regardless. `.jcp` playlists and `.jcm`
+ * track maps are outside song folders and never filtered.
+ *
+ * Built TS-side from the working-folder scan + parsed `.jcs` files
+ * when the user has the `exportOnlyReferencedFiles` pref turned on.
+ */
+export interface ExportIncludeFilter {
+  songs: Record<string, string[]>;
+}
+
 export async function exportToUsb(
   workingFolder: string,
   destPath: string,
+  includeFilter?: ExportIncludeFilter | null,
 ): Promise<ExportSummary> {
-  return invoke<ExportSummary>("export_to_usb", { workingFolder, destPath });
+  return invoke<ExportSummary>("export_to_usb", {
+    workingFolder,
+    destPath,
+    includeFilter: includeFilter ?? null,
+  });
 }
 
 /**
@@ -353,6 +374,28 @@ export async function deleteTrackMap(
   jcmPath: string,
 ): Promise<void> {
   await invoke<void>("delete_track_map", { workingFolder, jcmPath });
+}
+
+/**
+ * Delete one or more audio / MIDI files from a song folder. Used by
+ * the "Clean up unreferenced files" action on the Song Folder tab.
+ *
+ * `filenames` must be bare basenames (no path separators). Only `.wav`
+ * and `.mid` files are deletable through this command — `.jcs`, the
+ * `.bandmate-studio.json` sidecar, and hidden files are protected on
+ * the Rust side. Returns the filenames that were actually removed
+ * (or already absent on disk).
+ */
+export async function deleteFilesInSongFolder(
+  workingFolder: string,
+  songFolder: string,
+  filenames: string[],
+): Promise<string[]> {
+  return invoke<string[]>("delete_files_in_song_folder", {
+    workingFolder,
+    songFolder,
+    filenames,
+  });
 }
 
 /**

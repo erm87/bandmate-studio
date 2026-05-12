@@ -88,6 +88,19 @@ export interface UserPrefs {
    * Empty string / undefined = no default set.
    */
   defaultExportDestPath: string;
+  /**
+   * When true, USB export only copies audio / MIDI files that are
+   * referenced by at least one song's `.jcs`. Unused takes left
+   * behind in song folders from previous Logic exports are skipped,
+   * saving stick space + copy time. `.jcs` / `.jcp` / `.jcm` files
+   * always ship regardless of this setting (they're definitions,
+   * not media).
+   *
+   * Default is `false` — the live-rig reliability principle says
+   * we don't change export semantics by default. Users opt in
+   * once they understand their song folders accumulate cruft.
+   */
+  exportOnlyReferencedFiles: boolean;
 }
 
 export const DEFAULT_USER_PREFS: UserPrefs = {
@@ -99,6 +112,8 @@ export const DEFAULT_USER_PREFS: UserPrefs = {
   defaultTrackMapJcm: "default_tm.jcm",
   // Empty string = no sticky default; export dialog uses the picker.
   defaultExportDestPath: "",
+  // Off by default — full-copy stays the safe baseline.
+  exportOnlyReferencedFiles: false,
 };
 
 /**
@@ -132,6 +147,10 @@ export function loadUserPrefs(): UserPrefs {
         typeof parsed.defaultExportDestPath === "string"
           ? parsed.defaultExportDestPath
           : DEFAULT_USER_PREFS.defaultExportDestPath,
+      exportOnlyReferencedFiles:
+        typeof parsed.exportOnlyReferencedFiles === "boolean"
+          ? parsed.exportOnlyReferencedFiles
+          : DEFAULT_USER_PREFS.exportOnlyReferencedFiles,
     };
   } catch {
     return { ...DEFAULT_USER_PREFS };
