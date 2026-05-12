@@ -1199,6 +1199,188 @@ fn rename_track_map(
     Ok(dst.to_string_lossy().to_string())
 }
 
+// ---------------------------------------------------------------------------
+// Track-map import (cross-folder)
+// ---------------------------------------------------------------------------
+//
+// Two commands work together to support importing a `.jcm` from a
+// different working folder (or any folder, really) into the current one:
+//
+//   - `list_track_maps_in_folder` scans an arbitrary folder for .jcm files
+//     and returns metadata so the import dialog can show a pickable list.
+//   - `import_track_map` copies a single .jcm into the current working
+//     folder's `bm_trackmaps/`. The TS side detects name collisions
+//     against the active scan and decides on the final destination
+//     filename + whether to overwrite, so this command stays mechanical.
+//
+// .jcm files are self-contained — no per-trackmap sidecar metadata to
+// copy alongside (the `.bandmate-studio.json` sidecar is per-song only).
+
+/// One `.jcm` file found in an external folder, surfaced to the import
+/// dialog so it can render a pickable list with enough info for the
+/// user to disambiguate similarly-named files.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteTrackMap {
+    /// Filename including extension, e.g. "stems_tm.jcm".
+    pub filename: String,
+    /// Absolute path to the .jcm file in the source folder.
+    pub path: String,
+    /// Size in bytes (best-effort; 0 if metadata read fails).
+    pub size_bytes: u64,
+    /// Last-modified time as Unix epoch seconds (best-effort; None on
+    /// pre-epoch or unreadable mtime).
+    pub modified_seconds: Option<f64>,
+}
+
+/// Enumerate `.jcm` files inside the given folder's `bm_media/bm_trackmaps/`.
+/// Accepts either a working-folder root (with the standard layout) OR a
+/// raw folder that contains .jcm files directly — we look in the standard
+/// location first, then fall back to scanning the folder itself. This
+/// keeps the picker flexible: users can either point at another working
+/// folder OR at an ad-hoc folder full of `.jcm` exports.
+///
+/// Sorted alphabetically. Hidden files (leading dot) and non-.jcm files
+/// are skipped. Missing folders return an empty list rather than erroring
+/// so the dialog can show a "no track maps here" empty state.
+#[tauri::command]
+fn list_track_maps_in_folder(folder: String) -> Result<Vec<RemoteTrackMap>, String> {
+    let root = Path::new(&folder);
+    if !root.is_dir() {
+        return Err(format!("Not a directory: {}", folder));
+    }
+
+    // Prefer the standard layout when present; otherwise fall through to
+    // the folder itself. This way users can point at either a working
+    // folder root or a folder of loose `.jcm` files.
+    let scan_dir = {
+        let standard = root.join("bm_media").join("bm_trackmaps");
+        if standard.is_dir() {
+            standard
+        } else {
+            root.to_path_buf()
+        }
+    };
+
+    let mut out = Vec::new();
+    for entry in fs::read_dir(&scan_dir)
+        .map_err(|e| format!("Cannot read {:?}: {}", scan_dir, e))?
+    {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let entry_path = entry.path();
+        if !entry_path.is_file() {
+            continue;
+        }
+        let is_jcm = entry_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|e| e.eq_ignore_ascii_case("jcm"))
+            .unwrap_or(false);
+        if !is_jcm {
+            continue;
+        }
+        let filename = match entry_path.file_name().and_then(|n| n.to_str()) {
+            Some(n) if !n.starts_with('.') => n.to_string(),
+            _ => continue,
+        };
+        let metadata = entry.metadata().ok();
+        let size_bytes = metadata.as_ref().map(|m| m.len()).unwrap_or(0);
+        let modified_seconds = metadata
+            .as_ref()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs_f64());
+        out.push(RemoteTrackMap {
+            filename,
+            path: entry_path.to_string_lossy().to_string(),
+            size_bytes,
+            modified_seconds,
+        });
+    }
+
+    out.sort_by(|a, b| a.filename.to_lowercase().cmp(&b.filename.to_lowercase()));
+    Ok(out)
+}
+
+/// Copy a `.jcm` file into the current working folder's
+/// `bm_media/bm_trackmaps/` under the caller-specified filename.
+///
+/// The TS side is responsible for:
+///   1. Detecting name collisions (it already has the current scan).
+///   2. Letting the user choose Overwrite / Rename / Skip.
+///   3. Either calling this with `overwrite = true`, supplying a renamed
+///      `dest_filename`, or not calling at all (skip).
+///
+/// This command's job is narrow: validate inputs, ensure the trackmaps
+/// folder exists, and copy. Returns the destination path on success.
+#[tauri::command]
+fn import_track_map(
+    src_path: String,
+    dest_working_folder: String,
+    dest_filename: String,
+    overwrite: bool,
+) -> Result<String, String> {
+    let trimmed = dest_filename.trim();
+    if trimmed.is_empty() {
+        return Err("Destination filename cannot be empty.".to_string());
+    }
+    if trimmed.starts_with('.') {
+        return Err("Destination filename cannot start with a dot.".to_string());
+    }
+    if trimmed.contains('/') || trimmed.contains('\\') {
+        return Err("Destination filename cannot contain '/' or '\\'.".to_string());
+    }
+    if !trimmed.to_lowercase().ends_with(".jcm") {
+        return Err("Destination filename must end with .jcm.".to_string());
+    }
+
+    let src = Path::new(&src_path);
+    if !src.is_file() {
+        return Err(format!("Source track map not found: {}", src_path));
+    }
+    let src_is_jcm = src
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.eq_ignore_ascii_case("jcm"))
+        .unwrap_or(false);
+    if !src_is_jcm {
+        return Err(format!("Source is not a .jcm file: {}", src_path));
+    }
+
+    let working = Path::new(&dest_working_folder);
+    if !working.is_dir() {
+        return Err(format!(
+            "Destination working folder is not a directory: {}",
+            dest_working_folder
+        ));
+    }
+    let bm_trackmaps = working.join("bm_media").join("bm_trackmaps");
+    // Mirror `create_track_map`: require the standard subtree to exist
+    // so we never silently create a new layout in a folder that isn't a
+    // BandMate working folder.
+    if !bm_trackmaps.is_dir() {
+        return Err(
+            "bm_media/bm_trackmaps/ folder is missing — re-pick the working folder.".to_string(),
+        );
+    }
+
+    let dst = bm_trackmaps.join(trimmed);
+    if dst.exists() && !overwrite {
+        return Err(format!(
+            "A track map named '{}' already exists.",
+            trimmed
+        ));
+    }
+    if dst == src {
+        return Err(
+            "Source and destination are the same file — pick a different folder or filename."
+                .to_string(),
+        );
+    }
+    fs::copy(src, &dst).map_err(|e| format!("Cannot import track map: {}", e))?;
+    Ok(dst.to_string_lossy().to_string())
+}
+
 /// Recursive copy helper for `duplicate_song`. Std lib doesn't ship
 /// one; this is a small DFS that copies directory entries.
 fn copy_dir_recursive(src: &Path, dst: &Path) -> std::io::Result<()> {
@@ -1559,6 +1741,8 @@ pub fn run() {
             rename_song,
             rename_playlist,
             rename_track_map,
+            list_track_maps_in_folder,
+            import_track_map,
             clean_midi_file,
             is_midi_clean,
         ])
