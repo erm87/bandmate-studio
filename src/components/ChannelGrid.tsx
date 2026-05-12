@@ -354,7 +354,7 @@ export function ChannelGrid({
             return (
               <MidiRow
                 key="midi"
-                label={channelLabels[idx] ?? "MIDI"}
+                label={channelLabels[idx] ?? ""}
                 filename={midi?.filename ?? null}
                 cleanState={midiClean}
                 onClean={onCleanMidi}
@@ -381,7 +381,7 @@ export function ChannelGrid({
             <AudioRow
               key={idx}
               index={idx}
-              label={channelLabels[idx] ?? `Ch ${idx + 1}`}
+              label={channelLabels[idx] ?? ""}
               filename={file?.filename ?? null}
               level={file?.level ?? null}
               pan={file?.pan ?? null}
@@ -562,7 +562,7 @@ function AudioRow({
         )}
         title={label}
       >
-        {label || <span className="italic text-zinc-400">unnamed</span>}
+        {label}
       </span>
       {/* Icon slot — always present so filename column stays aligned.
           Rate-mismatch (error) takes precedence over the longest indicator. */}
@@ -1072,7 +1072,7 @@ function MidiRow({
         )}
         title={label}
       >
-        {label || <span className="italic text-zinc-400">unnamed</span>}
+        {label}
       </span>
       {/* Icon slot — stopwatch when the MIDI is the longest media in
           the song (its duration set <length>). Same treatment as the

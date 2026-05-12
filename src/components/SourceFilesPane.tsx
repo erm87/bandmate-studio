@@ -81,6 +81,14 @@ interface Props {
    * the song has finished loading).
    */
   onCleanupUnreferenced?: (() => void) | null;
+  /**
+   * Triggered by the "Import all" button in the Source Folder tab
+   * header. Parent walks the source folder, smart-matches files to
+   * trackmap channel labels (filling only empty channels), and
+   * direct-copies any unmatched files into the song folder. `null`
+   * suppresses the button (e.g. when no source folder is set).
+   */
+  onImportAll?: (() => void) | null;
 }
 
 export function SourceFilesPane({
@@ -93,6 +101,7 @@ export function SourceFilesPane({
   onClearSourceFolder,
   songFolderRefreshKey,
   onCleanupUnreferenced,
+  onImportAll,
 }: Props) {
   // Default to whichever tab is more useful: source if one's set, else
   // song folder. The pane remounts per song (SongEditor uses a `key`),
@@ -100,6 +109,22 @@ export function SourceFilesPane({
   const [activeTab, setActiveTab] = useState<Tab>(() =>
     sourceFolder ? "source" : "song",
   );
+
+  // Source-folder file list — populated by FolderView's onFilesLoaded
+  // callback so we can drive the "Import all" disabled state from
+  // here (rather than letting the button always render and discovering
+  // an empty folder when clicked).
+  const [sourceFolderFiles, setSourceFolderFiles] = useState<AudioFileInfo[]>(
+    [],
+  );
+  const hasUsableSourceFiles = sourceFolderFiles.some((f) => {
+    if (f.kind === "wav") {
+      const isStereo = (f.wavInfo?.channels ?? 1) > 1;
+      const isHardError = f.diagnostic?.severity === "error";
+      return !isStereo && !isHardError;
+    }
+    return true; // MIDI is always importable (no per-file diagnostic).
+  });
 
   return (
     <aside className="flex w-96 shrink-0 flex-col overflow-hidden bg-zinc-50 dark:bg-zinc-900/40">
@@ -148,6 +173,7 @@ export function SourceFilesPane({
         <FolderView
           folder={sourceFolder}
           refreshKey={0}
+          onFilesLoaded={setSourceFolderFiles}
           helper={
             <>
               Unimported files from an external folder (e.g., a Logic export).
@@ -162,6 +188,8 @@ export function SourceFilesPane({
             <SourceFolderHeaderActions
               onChange={() => void pickFolder(onChangeSourceFolder)}
               onClear={onClearSourceFolder}
+              onImportAll={onImportAll ?? null}
+              importAllDisabled={!hasUsableSourceFiles}
             />
           }
           emptyHint={
@@ -278,6 +306,7 @@ function FolderView({
   onSelectFile,
   headerAction,
   emptyHint,
+  onFilesLoaded,
 }: {
   folder: string;
   /**
@@ -293,6 +322,13 @@ function FolderView({
   onSelectFile: (file: AudioFileInfo) => void;
   headerAction: React.ReactNode | null;
   emptyHint: React.ReactNode;
+  /**
+   * Fires whenever the folder's listing refreshes. SourceFilesPane
+   * uses this for the source-folder case to know whether to enable
+   * the "Import all" button. Not needed for the song-folder case so
+   * the prop is optional.
+   */
+  onFilesLoaded?: (files: AudioFileInfo[]) => void;
 }) {
   // Seed from the module cache so re-visited folders render their
   // files immediately. If the cache miss, we start empty + show the
@@ -321,7 +357,10 @@ function FolderView({
         // Refresh the cache regardless of mount state — a stale cache
         // would defeat the whole point on the next visit.
         folderListCache.set(folder, list);
-        if (!cancelled) setFiles(list);
+        if (!cancelled) {
+          setFiles(list);
+          onFilesLoaded?.(list);
+        }
       })
       .catch((e) => {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
@@ -332,6 +371,11 @@ function FolderView({
     return () => {
       cancelled = true;
     };
+    // onFilesLoaded intentionally omitted — calling it on every render
+    // would defeat the cache + force unnecessary work in the parent.
+    // The parent gets one notification per actual refresh, which is
+    // what it needs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [folder, refreshKey]);
 
   const audioFiles = files.filter((f) => f.kind === "wav");
@@ -340,27 +384,33 @@ function FolderView({
   return (
     <>
       <div className="flex shrink-0 flex-col gap-1.5 border-b border-zinc-200 px-4 py-2.5 dark:border-zinc-800">
-        <div className="flex items-start justify-between gap-2">
-          <p
-            className="user-text min-w-0 flex-1 cursor-context-menu truncate self-center font-mono text-2xs text-zinc-500"
-            title={folder}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              setContextMenu({
-                position: { x: e.clientX, y: e.clientY },
-                items: [
-                  {
-                    label: "Open in Finder",
-                    onClick: () => void revealInFileManager(folder),
-                  },
-                ],
-              });
-            }}
-          >
-            {pathTail(folder)}
-          </p>
-          {headerAction && <div className="shrink-0">{headerAction}</div>}
-        </div>
+        {/* Row 1: folder path. Full-width so a long source-folder
+            path has room to truncate gracefully without being
+            crowded by the action buttons. */}
+        <p
+          className="user-text min-w-0 cursor-context-menu truncate font-mono text-2xs text-zinc-500"
+          title={folder}
+          onContextMenu={(e) => {
+            e.preventDefault();
+            setContextMenu({
+              position: { x: e.clientX, y: e.clientY },
+              items: [
+                {
+                  label: "Open in Finder",
+                  onClick: () => void revealInFileManager(folder),
+                },
+              ],
+            });
+          }}
+        >
+          {pathTail(folder)}
+        </p>
+        {/* Row 2: action buttons (Import all / Clear / Change… for
+            the source tab; Clean up… for the song tab). Sits on
+            its own line so the folder-path row above can claim
+            the full pane width. */}
+        {headerAction && <div className="flex">{headerAction}</div>}
+        {/* Row 3: helper text — explains what this tab is for. */}
         <p className="text-meta leading-snug text-zinc-500 dark:text-zinc-400">
           {helper}
         </p>
@@ -420,12 +470,41 @@ function FolderView({
 function SourceFolderHeaderActions({
   onChange,
   onClear,
+  onImportAll,
+  importAllDisabled,
 }: {
   onChange: () => void;
   onClear: () => void;
+  onImportAll: (() => void) | null;
+  /**
+   * Disable the Import-all chip when the source folder has no
+   * usable .wav / .mid files (empty folder, or only stereo / hard-
+   * error WAVs). Computed in the parent from the file-list refresh.
+   */
+  importAllDisabled: boolean;
 }) {
   return (
     <div className="flex items-center gap-2">
+      {onImportAll && (
+        // Tonal because Import-all is the primary workflow action of
+        // this pane — pulling files from an external folder into the
+        // song is the whole point of the Source Folder tab. Sits to
+        // the left of the neutral Clear / Change… chrome buttons so
+        // it reads as "the action," not "another setting."
+        <Button
+          variant="tonal"
+          size="xs"
+          onClick={onImportAll}
+          disabled={importAllDisabled}
+          title={
+            importAllDisabled
+              ? "No .wav or .mid files to import in this folder"
+              : "Smart-match each file to a track-map channel by name; copy the rest into the song folder"
+          }
+        >
+          Import all
+        </Button>
+      )}
       <Button
         variant="tertiary"
         size="xs"
