@@ -16,8 +16,9 @@
  *     to update inbound references.
  */
 
-import { useState, type ReactNode } from "react";
+import { forwardRef, useEffect, useRef, useState, type ReactNode } from "react";
 import { ask } from "@tauri-apps/plugin-dialog";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import {
   parsePlaylist,
   writePlaylist,
@@ -29,12 +30,14 @@ import {
   duplicatePlaylist,
   duplicateSong,
   duplicateTrackMap,
+  importTrackMap,
   readTextFile,
   renamePlaylist,
   renameSong,
   renameTrackMap,
   revealInFileManager,
   writeTextFile,
+  type RemoteTrackMap,
 } from "../fs/workingFolder";
 import {
   findPlaylistsReferencingSong,
@@ -47,6 +50,7 @@ import { ContextMenu, type OpenContextMenu } from "./ContextMenu";
 import { NewSongDialog } from "./NewSongDialog";
 import { NewPlaylistDialog } from "./NewPlaylistDialog";
 import { NewTrackMapDialog } from "./NewTrackMapDialog";
+import { ImportTrackMapDialog } from "./ImportTrackMapDialog";
 import { RenameDialog } from "./RenameDialog";
 import type {
   PlaylistSummary,
@@ -93,6 +97,20 @@ export function Sidebar() {
   const [newSongOpen, setNewSongOpen] = useState(false);
   const [newPlaylistOpen, setNewPlaylistOpen] = useState(false);
   const [newTrackMapOpen, setNewTrackMapOpen] = useState(false);
+  const [importTrackMapOpen, setImportTrackMapOpen] = useState(false);
+  /**
+   * When set, ImportTrackMapDialog opens pre-populated with these files
+   * (no folder-pick step). Set by the drag-drop handler.
+   */
+  const [importPrepopulated, setImportPrepopulated] = useState<
+    RemoteTrackMap[] | null
+  >(null);
+  /**
+   * Visual highlight on the Track Maps section while files are being
+   * dragged over it. Toggled by the Tauri drag-drop event listener.
+   */
+  const [isDragOver, setIsDragOver] = useState(false);
+  const trackMapsSectionRef = useRef<HTMLDetailsElement | null>(null);
   const [contextMenu, setContextMenu] = useState<OpenContextMenu | null>(null);
   const [rowError, setRowError] = useState<string | null>(null);
   /**
@@ -100,6 +118,165 @@ export function Sidebar() {
    * cross-reference preview so the dialog opens already populated.
    */
   const [renameTarget, setRenameTarget] = useState<RenameTarget | null>(null);
+
+  // ---- Drag-drop: import .jcm into Track Maps section -------------------
+  //
+  // With tauri.conf.json's `dragDropEnabled: true`, Tauri sends webview
+  // drag/drop events instead of letting the browser handle them. We
+  // subscribe at mount and hit-test the drop position against the Track
+  // Maps section's bounding rect.
+  //
+  // Two structural requirements that bit earlier versions of this code:
+  //
+  // 1. The listener must always see the LATEST `state.workingFolder` /
+  //    `trackMaps` / `rescan` / `dispatch` — not stale closure captures
+  //    from the render where the listener was first registered.
+  //    Otherwise a delete-then-redrop cycle leaves the listener calling
+  //    a stale handler that thinks the deleted file still exists.
+  //    Solution: keep the listener registered ONCE (empty deps) and
+  //    have it call `dropHandlerRef.current(paths)`, where the ref is
+  //    re-pointed at the latest handler on every render.
+  //
+  // 2. 'over' events have no `paths` field (only 'enter' and 'drop' do).
+  //    Treating `paths.length > 0` as the eligibility predicate on
+  //    every event causes the drop indicator to flicker off on every
+  //    'over' tick. Solution: latch eligibility on 'enter', clear on
+  //    'leave' or 'drop'.
+  //
+  // Coordinate note: Tauri v2 reports positions in *physical* pixels;
+  // divide by devicePixelRatio to compare against getBoundingClientRect
+  // (CSS pixels).
+  //
+  // Single .jcm with no name collision → import directly (fast path).
+  // Multiple files OR any collision → open the import dialog with the
+  // dropped files pre-populated, so the user can resolve and confirm.
+
+  /**
+   * Always-current drop handler. Re-pointed every render so the
+   * mounted-once event listener invokes the latest closure (and so
+   * picks up the latest `trackMaps` / `state.workingFolder` after a
+   * delete + rescan).
+   */
+  const dropHandlerRef = useRef<(paths: string[]) => void>(() => {});
+  dropHandlerRef.current = (paths: string[]) => {
+    if (!state.workingFolder) return;
+    void (async () => {
+      setRowError(null);
+
+      // Build RemoteTrackMap entries for each dropped file. We don't
+      // have size/mtime cheaply on the TS side, so we synthesize a
+      // minimal shape — the dialog renders fine with sizeBytes=0 /
+      // null mtime (those fields format as "0 B" / "" respectively).
+      // The dialog itself doesn't depend on accurate stats for
+      // collision resolution.
+      const dropped: RemoteTrackMap[] = paths.map((p) => {
+        const filename = p.split(/[\\/]/).pop()?.trim() ?? p;
+        return {
+          filename,
+          path: p,
+          sizeBytes: 0,
+          modifiedSeconds: null,
+        };
+      });
+
+      const existingLowercased = new Set(
+        trackMaps.map((tm) => tm.filename.toLowerCase()),
+      );
+      const anyCollides = dropped.some((d) =>
+        existingLowercased.has(d.filename.toLowerCase()),
+      );
+
+      // Fast path: one file, no collision → import inline.
+      if (dropped.length === 1 && !anyCollides) {
+        try {
+          const newPath = await importTrackMap(
+            dropped[0].path,
+            state.workingFolder!,
+            dropped[0].filename,
+            false,
+          );
+          await rescan();
+          dispatch({
+            type: "select",
+            selection: { kind: "trackMap", path: newPath },
+          });
+        } catch (e) {
+          setRowError(e instanceof Error ? e.message : String(e));
+        }
+        return;
+      }
+
+      // Slow path: open the dialog pre-populated so the user can
+      // resolve collisions / confirm.
+      setImportPrepopulated(dropped);
+      setImportTrackMapOpen(true);
+    })();
+  };
+
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    let cancelled = false;
+    // Latched on 'enter' when the drag carries at least one .jcm.
+    // Cleared on 'leave' or 'drop'. The drop-zone highlight uses
+    // (eligible && inside) so continuous 'over' events (which carry
+    // no paths field in Tauri v2) don't flicker the indicator off.
+    let eligible = false;
+
+    void (async () => {
+      const webview = getCurrentWebview();
+      const offFn = await webview.onDragDropEvent((event) => {
+        const paths =
+          "paths" in event.payload
+            ? event.payload.paths.filter((p) =>
+                p.toLowerCase().endsWith(".jcm"),
+              )
+            : [];
+
+        // No position-based hit-test. Tauri v2 on macOS reports
+        // drag-drop coordinates in a system that doesn't line up
+        // cleanly with `getBoundingClientRect()` — we tested it: the
+        // reported position is consistently in the upper-left of the
+        // window regardless of where the cursor actually is. Since
+        // `.jcm` files only ever go to the Track Maps section, we
+        // accept a drop anywhere in the window and always route it
+        // there; the visible overlay on the section tells the user
+        // where the file is headed.
+        if (event.payload.type === "enter") {
+          eligible = paths.length > 0;
+          setIsDragOver(eligible);
+          return;
+        }
+        if (event.payload.type === "over") {
+          setIsDragOver(eligible);
+          return;
+        }
+        if (event.payload.type === "leave") {
+          eligible = false;
+          setIsDragOver(false);
+          return;
+        }
+        if (event.payload.type === "drop") {
+          const wasEligible = eligible;
+          setIsDragOver(false);
+          eligible = false;
+          if (!wasEligible || paths.length === 0) return;
+          dropHandlerRef.current(paths);
+        }
+      });
+      if (cancelled) offFn();
+      else unlisten = offFn;
+    })();
+
+    return () => {
+      cancelled = true;
+      if (unlisten) unlisten();
+    };
+    // Listener registered once on mount; pulls state via
+    // dropHandlerRef.current. Re-registering on every state change
+    // caused the prior bug where the second drop silently used a
+    // stale closure.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const toggleSelect = (
     selection:
@@ -596,13 +773,30 @@ export function Sidebar() {
         </Section>
 
         <Section
+          ref={trackMapsSectionRef}
           title="Track Maps"
           count={trackMaps.length}
+          highlight={isDragOver}
+          dropLabel="Drop to import track map"
           action={
             <SectionAction
               label="New Track Map"
               ariaLabel="New Track Map"
-              onClick={() => setNewTrackMapOpen(true)}
+              onClick={(e) =>
+                openMenu(e, [
+                  {
+                    label: "New track map…",
+                    onClick: () => setNewTrackMapOpen(true),
+                  },
+                  {
+                    label: "Import from another folder…",
+                    onClick: () => {
+                      setImportPrepopulated(null);
+                      setImportTrackMapOpen(true);
+                    },
+                  },
+                ])
+              }
             />
           }
         >
@@ -696,6 +890,14 @@ export function Sidebar() {
         isOpen={newTrackMapOpen}
         onClose={() => setNewTrackMapOpen(false)}
       />
+      <ImportTrackMapDialog
+        isOpen={importTrackMapOpen}
+        prepopulated={importPrepopulated}
+        onClose={() => {
+          setImportTrackMapOpen(false);
+          setImportPrepopulated(null);
+        }}
+      />
       <ContextMenu menu={contextMenu} onClose={() => setContextMenu(null)} />
       <RenameDialog
         isOpen={renameTarget !== null}
@@ -733,26 +935,43 @@ export function Sidebar() {
   );
 }
 
-function Section({
-  title,
-  count,
-  action,
-  children,
-}: {
-  title: string;
-  count: number;
-  /**
-   * Optional inline action (e.g., a "+" button) shown to the right of
-   * the section title. Click events on the action don't toggle the
-   * collapsible — the action stops propagation itself.
-   */
-  action?: ReactNode;
-  children: ReactNode;
-}) {
+const Section = forwardRef<
+  HTMLDetailsElement,
+  {
+    title: string;
+    count: number;
+    /**
+     * Optional inline action (e.g., a "+" button) shown to the right of
+     * the section title. Click events on the action don't toggle the
+     * collapsible — the action stops propagation itself.
+     */
+    action?: ReactNode;
+    /**
+     * When true, render an overt drop-zone overlay over the section's
+     * body, plus a ring on the section itself. Set by the parent's
+     * drag-drop listener while eligible files are dragged over this
+     * section. Text content of the overlay is `dropLabel`.
+     */
+    highlight?: boolean;
+    /**
+     * Label shown inside the drop-zone overlay when `highlight` is on.
+     * Renders nothing if undefined.
+     */
+    dropLabel?: string;
+    children: ReactNode;
+  }
+>(function Section(
+  { title, count, action, highlight, dropLabel, children },
+  ref,
+) {
   return (
     <details
+      ref={ref}
       open
-      className="group border-b border-zinc-200 last:border-b-0 dark:border-zinc-800"
+      className={cn(
+        "group border-b border-zinc-200 transition last:border-b-0 dark:border-zinc-800",
+        highlight && "ring-2 ring-inset ring-brand-400",
+      )}
     >
       <summary className="bms-summary flex cursor-pointer items-center justify-between px-4 pt-4 pb-2 hover:bg-zinc-100/60 dark:hover:bg-zinc-900/60">
         <div className="flex items-center gap-1.5">
@@ -768,10 +987,25 @@ function Section({
           </span>
         </div>
       </summary>
-      <div className="pb-3">{children}</div>
+      <div className="relative min-h-[3.5rem] pb-3">
+        {children}
+        {highlight && dropLabel && (
+          // pointer-events-none so the drop event still reaches the
+          // window-level Tauri listener (which is what actually
+          // dispatches the file paths to JS).
+          <div
+            aria-hidden="true"
+            className="pointer-events-none absolute inset-x-2 inset-y-1 z-10 flex items-center justify-center rounded-lg border-2 border-dashed border-brand-400 bg-brand-50/95 px-3 text-center shadow-sm backdrop-blur-sm dark:border-brand-400 dark:bg-brand-950/90"
+          >
+            <span className="text-sm font-medium text-brand-700 dark:text-brand-200">
+              {dropLabel}
+            </span>
+          </div>
+        )}
+      </div>
     </details>
   );
-}
+});
 
 /**
  * Tiny "+" action button shown next to a Section header. Stops click
@@ -784,7 +1018,12 @@ function SectionAction({
 }: {
   label: string;
   ariaLabel: string;
-  onClick: () => void;
+  /**
+   * Click handler. Receives the React mouse event so callers that want
+   * to open a popover menu (Track Maps section uses this for the New /
+   * Import menu) can pass the event to `openMenu` for positioning.
+   */
+  onClick: (e: React.MouseEvent) => void;
 }) {
   return (
     <button
@@ -792,7 +1031,7 @@ function SectionAction({
       onClick={(e) => {
         e.preventDefault();
         e.stopPropagation();
-        onClick();
+        onClick(e);
       }}
       title={label}
       aria-label={ariaLabel}

@@ -439,3 +439,60 @@ export async function renameTrackMap(
     newName,
   });
 }
+
+// ---------------------------------------------------------------------------
+// Track-map import (cross-folder)
+// ---------------------------------------------------------------------------
+
+/**
+ * Mirrors the Rust `RemoteTrackMap` struct — a single .jcm found in an
+ * external folder, surfaced to the import dialog with enough metadata
+ * (size + mtime) to help the user disambiguate similarly-named files.
+ */
+export interface RemoteTrackMap {
+  /** Filename including extension, e.g. "stems_tm.jcm". */
+  filename: string;
+  /** Absolute path to the .jcm file in the source folder. */
+  path: string;
+  /** Size in bytes (0 if metadata read failed). */
+  sizeBytes: number;
+  /** Last-modified time as Unix epoch seconds (null if unreadable). */
+  modifiedSeconds: number | null;
+}
+
+/**
+ * Enumerate `.jcm` files in an external folder. Looks under
+ * `<folder>/bm_media/bm_trackmaps/` first; if that subtree isn't there,
+ * scans `<folder>` directly. Returns an empty list if the folder has no
+ * `.jcm` files — the dialog renders an empty state in that case.
+ */
+export async function listTrackMapsInFolder(
+  folder: string,
+): Promise<RemoteTrackMap[]> {
+  return invoke<RemoteTrackMap[]>("list_track_maps_in_folder", { folder });
+}
+
+/**
+ * Copy a `.jcm` file into the current working folder's
+ * `bm_media/bm_trackmaps/` under `destFilename` (must end in `.jcm`).
+ *
+ * The TS-side caller detects name collisions against the active scan
+ * and decides the policy. Pass `overwrite: true` to replace an existing
+ * file with the same name; otherwise the command errors on collision.
+ *
+ * Returns the absolute path of the newly-imported file. Caller should
+ * trigger a working-folder rescan afterwards so the Sidebar picks it up.
+ */
+export async function importTrackMap(
+  srcPath: string,
+  destWorkingFolder: string,
+  destFilename: string,
+  overwrite: boolean,
+): Promise<string> {
+  return invoke<string>("import_track_map", {
+    srcPath,
+    destWorkingFolder,
+    destFilename,
+    overwrite,
+  });
+}
