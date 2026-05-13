@@ -4,37 +4,29 @@ BandMate Studio uses [semantic versioning](https://semver.org/): `MAJOR.MINOR.PA
 
 Pre-1.0 the semver spec explicitly carves out "anything goes" — we use the freedom to bump MINOR liberally during alpha while still keeping a clear release trail.
 
+The **release criteria** for moving between phases (alpha → beta → stable) live in [ROADMAP.md](ROADMAP.md). This file captures the *mechanics* of versioning — the per-PR bump workflow, phase semantics in code, and how the version surfaces in the app.
+
 ## Phases
 
-We track three lifecycle phases. The current phase is encoded in `src/lib/appPhase.ts` and surfaced in the app's Settings → About panel.
+We track three lifecycle phases. The current phase is encoded in `src/lib/appPhase.ts` and surfaced in the app's Settings → About panel. Flip the constant by hand when crossing a phase threshold; the criteria for each crossing live in [ROADMAP.md](ROADMAP.md).
 
 ### Alpha — current
 
-- Active feature development.
-- Breaking changes can happen at any minor bump.
-- Single user (Eric + band) on the rig; not yet shared externally.
-- Bump MINOR per PR (most PRs introduce new behavior). Bump PATCH for fix-only PRs that don't add or change behavior.
+Active feature development. Breaking changes can land at any minor bump. Single user (Eric + band) on the rig; not yet shared externally.
 
-### Beta — gated by these criteria
+Bump MINOR per PR (most PRs introduce new behavior). Bump PATCH for fix-only PRs that don't add or change behavior.
 
-Promote to Beta (= flip `APP_PHASE` to `"beta"`) when all four are true:
+### Beta
 
-1. USB Export output of Studio matches that of BM Loader on both macOS and Windows (byte-level parity verified).
-2. Performance using Studio's USB export validated in actual rehearsal (BandMate hardware playback no different from a Loader-exported stick).
-3. Windows build validated end-to-end (working folder pick → song edit → USB export → BandMate playback).
-4. No backlog entries marked as `blocking`.
+Private dogfooding release shared with the band + Joe at JoeCo. Criteria in [ROADMAP.md § Beta](ROADMAP.md#v0x0-beta--beta-release).
 
-The Beta version is whichever `0.X.0` happens to be next when the criteria are met. We don't reserve a specific number ahead of time — could be `0.8.0`, `0.11.0`, or `0.14.0` depending on cadence. Share the Beta build with Joe and any other early testers when reached.
+The Beta version is whichever `0.X.0` happens to be next when the criteria are met — we don't reserve a specific number ahead of time. Could be `0.8.0`, `0.11.0`, or `0.14.0` depending on cadence.
 
-### Stable (1.0.0) — gated by these criteria
+### Stable (1.0.0+)
 
-Cut `1.0.0` when all three are true:
+First public release via GitHub Releases. Criteria in [ROADMAP.md § v1](ROADMAP.md#v1x--initial-release-stable).
 
-1. The rig has run multiple live rehearsals using a Studio-exported stick with no critical issues.
-2. Joe has Q&A'd the app and approved.
-3. No backlog entries marked as `blocking`.
-
-After 1.0, the scheme tightens:
+After 1.0, the bump scheme tightens:
 
 - **MAJOR** for changes that break the user's existing setup (working-folder layout changes, format-level changes to `.jcs` / `.jcp` / `.jcm`, or anything that requires the user to re-do work).
 - **MINOR** for backwards-compatible new features.

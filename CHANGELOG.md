@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-05-13
+
+### Documentation
+- New `docs/ROADMAP.md` as the canonical release roadmap (Beta / v1 / v2 criteria + v2 strategic-direction question).
+- `docs/VERSIONING.md` slimmed to focus on bump mechanics + phase semantics; release criteria now live in `ROADMAP.md`.
+- `BACKLOG.md` cleaned of stale entries (button cleanup, USB-export skip, editor-pane refactor); added 2 `[Beta blocker]` entries (in-app feedback, working-folder backwards-compat audit). Beta-blocker tagging added so we can see what gates the alpha → beta flip at a glance.
+
 ## [0.2.0] — 2026-05-13
 
 Baseline release capturing all work to date. The on-disk version had been frozen at `0.1.0` since project start, so this version cuts a clean line under "everything shipped so far" and starts the bump-per-PR cadence. Phase: **alpha**.
