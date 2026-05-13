@@ -45,7 +45,9 @@ https://github.com/erm87/bandmate-studio/issues/new
 
 ## [Beta blocker] Working folder backwards-compatibility audit + tests
 
-**Where:** New `docs/COMPAT-TEST.md` (or appended to `docs/SMOKE-TEST.md`) capturing the test plan. Code touches in the codec + USB-export paths if the audit surfaces regressions.
+**Status:** Test plan + tooling shipped 2026-05-13. The audit run itself is the remaining step — requires Eric to have BM Loader + a substantive working folder side-by-side, runs through the 5 phases in [docs/COMPAT-TEST.md](docs/COMPAT-TEST.md). This entry stays open until the audit completes and any regressions are addressed.
+
+**Where:** Audit protocol lives in [docs/COMPAT-TEST.md](docs/COMPAT-TEST.md). Supporting tools: `scripts/snapshot-working-folder.sh` (captures tree + sha256 hashes) and `scripts/diff-snapshots.sh` (compares two snapshots, surfaces added / removed / changed files). Code touches in the codec + USB-export paths only if the audit surfaces regressions.
 
 **Idea:** Run an explicit round-trip test pass between BMS and BM Loader to verify the four sub-criteria from [docs/ROADMAP.md § Beta criterion 1](docs/ROADMAP.md#criteria) all hold:
 
@@ -54,20 +56,9 @@ https://github.com/erm87/bandmate-studio/issues/new
 - (c) **Coexistence:** Alternating between BMS and BM Loader on the same working folder over multiple sessions doesn't pile up artifacts or diverge state.
 - (d) **Byte-level parity** on the deterministic portions of `.jcs` / `.jcp` / `.jcm` outputs.
 
-**Test plan sketch:**
-1. Take a known-good working folder produced by BM Loader (snapshot via tree + sha256 per file).
-2. Open in BMS, make a few small edits, save.
-3. Diff the resulting tree against the snapshot:
-   - The same set of files exists (plus possibly `.bandmate-studio.json` sidecars in song folders).
-   - The edited files have only the expected diffs (line-ending convention matches Loader; no spurious whitespace; no Studio-only extensions inside the file content).
-   - Unedited files are byte-identical to the snapshot.
-4. Re-open in BM Loader. Verify all songs / playlists / track maps load + display correctly.
-5. Edit something in BM Loader, save, re-open in BMS, verify cleanly. Repeat in the other direction.
-6. Repeat the round-trip several times to surface any state buildup (sidecars getting duplicated, line endings drifting, etc.).
-
 **Likely outcome:** mostly clean — we audited codec parity in task #1 of the project and fixed F-2 through F-8 (length / line-endings / templates / sample-rate seeding / sidecar filtering). This task is to **verify** the audit's conclusions hold for an explicit round-trip rather than just the codec layer in isolation.
 
-**If issues surface:** open targeted bugs for each, fix before promoting to Beta.
+**If issues surface:** open targeted GitHub Issues per regression, fix before promoting to Beta. The "Known acceptable diffs" section of COMPAT-TEST.md captures expected formatting differences (`.jcm` line endings, `<length>` recomputation post-F-2) so we don't false-positive those.
 
 **Captured:** 2026-05-13. Beta criterion 1 in [docs/ROADMAP.md](docs/ROADMAP.md).
 

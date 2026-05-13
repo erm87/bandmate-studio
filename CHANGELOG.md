@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.3.1] — 2026-05-13
+
+### Documentation
+
+- New `docs/COMPAT-TEST.md`: 5-phase round-trip test plan verifying BandMate Studio reads, writes, and coexists with BM Loader on the same working folder. Closes Beta criterion 1's *protocol* (test apparatus); the audit *run* is the remaining manual step.
+- New `scripts/snapshot-working-folder.sh` + `scripts/diff-snapshots.sh`: small shell tools used by the compat protocol to capture tree + sha256 hashes of a working folder and surface added / removed / changed files between two snapshots.
+- `BACKLOG.md`: updated the working-folder backwards-compat entry to reflect that the test plan + tooling are shipped; the audit run on a real working folder + BM Loader is the remaining Beta-blocker step.
+
+### Changed
+
+- `scripts/bump-version.mjs` now also patches `src-tauri/Cargo.lock` alongside the other three version files. Fixes a one-version drift that's existed since 0.2.0 (Cargo.lock was updated lazily by `cargo build` on the next dev cycle, which meant `git diff` always showed Cargo.lock churn after a bump). The lockfile is now in sync within the same commit as Cargo.toml.
+
+
 ## [0.3.0] — 2026-05-13
 
 ### Added
