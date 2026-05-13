@@ -2,7 +2,7 @@
 /**
  * Atomic version bumper for BandMate Studio.
  *
- * We carry the version in three files that the Tauri build pipeline
+ * We carry the version in four files that the Tauri build pipeline
  * reads independently:
  *
  *   - src-tauri/tauri.conf.json   (the canonical source — what the
@@ -11,6 +11,11 @@
  *                                  Windows)
  *   - src-tauri/Cargo.toml        (the Rust crate version; surfaces in
  *                                  Cargo metadata and the binary)
+ *   - src-tauri/Cargo.lock        (Cargo's pin for the workspace; auto-
+ *                                  regenerates on next `cargo build`,
+ *                                  but keeping it in sync within the
+ *                                  same commit avoids a one-version
+ *                                  drift in `git diff`)
  *   - package.json                (the Node side; informational, and
  *                                  what `pnpm` reports for the project)
  *
@@ -48,6 +53,7 @@ const repoRoot = resolve(__dirname, "..");
 
 const TAURI_CONF = resolve(repoRoot, "src-tauri/tauri.conf.json");
 const CARGO_TOML = resolve(repoRoot, "src-tauri/Cargo.toml");
+const CARGO_LOCK = resolve(repoRoot, "src-tauri/Cargo.lock");
 const PACKAGE_JSON = resolve(repoRoot, "package.json");
 
 function readCurrentVersion() {
@@ -135,6 +141,47 @@ function patchAll(newVersion) {
     `"version": "${newVersion}"`,
     "package.json",
   );
+
+  // Cargo.lock — the bandmate-studio package entry has a `version`
+  // line right after `name = "bandmate-studio"`. We anchor the
+  // match on the name so we don't accidentally rewrite a transitive
+  // dep that happens to share a version string.
+  patchCargoLockVersion(newVersion);
+}
+
+/**
+ * Cargo.lock has a `[[package]]` block per crate. The block for
+ * our crate looks like:
+ *
+ *     [[package]]
+ *     name = "bandmate-studio"
+ *     version = "0.3.0"
+ *     dependencies = [...]
+ *
+ * We patch the version line that *immediately follows* the
+ * `name = "bandmate-studio"` line. Anchoring on the name keeps us
+ * from rewriting a dep crate that happens to share a version
+ * string. `cargo build` will also auto-resync Cargo.lock against
+ * Cargo.toml on next run, but doing it here keeps the lockfile and
+ * the canonical version in sync within the same commit.
+ */
+function patchCargoLockVersion(newVersion) {
+  const before = readFileSync(CARGO_LOCK, "utf8");
+  const regex = /(name = "bandmate-studio"\nversion = ")[^"]+(")/;
+  const matches = before.match(new RegExp(regex.source, "g"));
+  if (!matches) {
+    throw new Error(
+      "Cargo.lock: didn't find a `name = \"bandmate-studio\"` block. " +
+        "Did the crate get renamed?",
+    );
+  }
+  if (matches.length > 1) {
+    throw new Error(
+      `Cargo.lock: found ${matches.length} bandmate-studio entries; expected 1.`,
+    );
+  }
+  const after = before.replace(regex, `$1${newVersion}$2`);
+  writeFileSync(CARGO_LOCK, after);
 }
 
 // ---- main ----
@@ -155,6 +202,7 @@ console.log(`Version bumped: ${current} → ${next}`);
 console.log("Files updated:");
 console.log("  src-tauri/tauri.conf.json");
 console.log("  src-tauri/Cargo.toml");
+console.log("  src-tauri/Cargo.lock");
 console.log("  package.json");
 console.log("");
 console.log("Next steps:");
