@@ -1,8 +1,162 @@
 # BandMate Studio — backlog
 
-Running list of polish/refinement ideas captured outside the active phase plan. Move items into MVP-PLAN.md (or a follow-up plan) when we're ready to act on them.
+Running list of polish / refinement / feature ideas captured outside the release-level roadmap. Release-level goals live in [docs/ROADMAP.md](docs/ROADMAP.md); this file is the working list of items waiting to be picked up.
+
+Items tagged **[Beta blocker]** in their heading must ship before flipping `APP_PHASE` to `"beta"` (see [docs/ROADMAP.md § Beta criteria](docs/ROADMAP.md#criteria)).
 
 Newest entries on top.
+
+---
+
+## [Beta blocker] In-app feedback — pre-filled GitHub Issues URL
+
+**Where:** New "Send feedback…" affordance, probably in the working-folder bar's gear menu OR a button in Settings → About. Implementation lives wherever's most discoverable to a user who just hit a bug.
+
+**Idea:** Build a small handler that constructs a GitHub Issues URL with the app's context pre-populated, then opens it in the user's browser via Tauri's shell plugin. The user authenticates with their own GitHub account in the browser and submits the issue. No service-side secrets, no auth flow inside BMS.
+
+**URL shape:**
+```
+https://github.com/erm87/bandmate-studio/issues/new
+  ?title=<encoded title>
+  &body=<encoded body with version / OS / context preloaded>
+  &labels=feedback
+```
+
+**Body template (auto-populated):**
+- App version (`getVersion()`).
+- App phase (`APP_PHASE`).
+- OS + arch (from `@tauri-apps/plugin-os` or similar).
+- Working folder path (if one is set) — opt-in, since the path can be personally-identifying.
+- A blank section for the user to describe what happened + what they expected.
+
+**Why this approach over alternatives:**
+- A bundled GitHub API token would have to ship in the binary — easily extractable, gets revoked, anyone-can-spam.
+- A proxy service we host is overkill for current scale.
+- Pre-filled URL approach is zero-infra, gives the issue the user's real GitHub identity (useful for follow-up), and works the moment a user clicks.
+
+**Implementation notes:**
+- `@tauri-apps/plugin-shell`'s `open()` opens URLs in the user's default browser. Already a dep we use elsewhere (or trivial to add).
+- Confirm the URL length stays under the limit `tauri.shell.open` enforces and what most browsers accept (~2k chars is safe). Body content needs `encodeURIComponent`.
+- Light dialog UX: a small confirm explaining "this opens GitHub in your browser to submit feedback. Some app context will be pre-filled — review before submitting." Then a button that triggers the open.
+
+**Captured:** 2026-05-13. Beta criterion 5 in [docs/ROADMAP.md](docs/ROADMAP.md).
+
+---
+
+## [Beta blocker] Working folder backwards-compatibility audit + tests
+
+**Where:** New `docs/COMPAT-TEST.md` (or appended to `docs/SMOKE-TEST.md`) capturing the test plan. Code touches in the codec + USB-export paths if the audit surfaces regressions.
+
+**Idea:** Run an explicit round-trip test pass between BMS and BM Loader to verify the four sub-criteria from [docs/ROADMAP.md § Beta criterion 1](docs/ROADMAP.md#criteria) all hold:
+
+- (a) **Read:** BMS can open and edit a working folder created by BM Loader without breaking anything.
+- (b) **Write:** BMS-edited files can be re-opened in BM Loader and behave identically.
+- (c) **Coexistence:** Alternating between BMS and BM Loader on the same working folder over multiple sessions doesn't pile up artifacts or diverge state.
+- (d) **Byte-level parity** on the deterministic portions of `.jcs` / `.jcp` / `.jcm` outputs.
+
+**Test plan sketch:**
+1. Take a known-good working folder produced by BM Loader (snapshot via tree + sha256 per file).
+2. Open in BMS, make a few small edits, save.
+3. Diff the resulting tree against the snapshot:
+   - The same set of files exists (plus possibly `.bandmate-studio.json` sidecars in song folders).
+   - The edited files have only the expected diffs (line-ending convention matches Loader; no spurious whitespace; no Studio-only extensions inside the file content).
+   - Unedited files are byte-identical to the snapshot.
+4. Re-open in BM Loader. Verify all songs / playlists / track maps load + display correctly.
+5. Edit something in BM Loader, save, re-open in BMS, verify cleanly. Repeat in the other direction.
+6. Repeat the round-trip several times to surface any state buildup (sidecars getting duplicated, line endings drifting, etc.).
+
+**Likely outcome:** mostly clean — we audited codec parity in task #1 of the project and fixed F-2 through F-8 (length / line-endings / templates / sample-rate seeding / sidecar filtering). This task is to **verify** the audit's conclusions hold for an explicit round-trip rather than just the codec layer in isolation.
+
+**If issues surface:** open targeted bugs for each, fix before promoting to Beta.
+
+**Captured:** 2026-05-13. Beta criterion 1 in [docs/ROADMAP.md](docs/ROADMAP.md).
+
+---
+
+## Settings — toggle for Smart Mapping on import
+
+**Where:** Settings dialog → **Defaults** section (`SettingsDialog.tsx`). `userPrefs` in `persistence.ts`. Read by `SongEditor.tsx`'s `handleImportAll` and by the new auto-update dialog (next entry).
+
+**Idea:** Add a toggle: **"Smart Mapping when importing from Source Folder"**. When on (default): the existing Import-all flow runs `bestChannelForFilename` against each candidate WAV and assigns matches to channels. When off: imports copy files into the Song Folder unassigned — no fuzzy matching, no auto-update dialog, no channel assignment writes. The user does the mapping by hand.
+
+**Why:** Smart Mapping is great when the band's filenames stay in lockstep with track-map labels, but it's a footgun for users with idiosyncratic naming where the fuzzy matcher guesses wrong often enough to be net-negative. A single switch lets each user choose whether Smart Mapping is a feature or out of the way.
+
+**Implementation notes:**
+- New field on `userPrefs`: `smartMappingEnabled: boolean`, default `true` (preserves current behavior for existing users).
+- Single source of truth — both the basic Smart Mapping path *and* the new auto-update-existing-channels behavior (next entry) gate on this same flag. When off, the auto-update dialog never appears.
+- Surface in Settings as a labeled toggle with a short helper description summarizing what it does, since "Smart Mapping" alone won't be self-evident to a returning user.
+
+**Captured:** 2026-05-11
+
+---
+
+## Smart Mapping — auto-update existing channel assignments on re-import
+
+**Where:** `SongEditor.tsx` → `handleImportAll` (currently around line 1014). Today the fuzzy matcher (`bestChannelForFilename` in `lib/sourceMatch.ts`) **only assigns to empty channels** — the in-code comment explicitly says "existing assignments are never overwritten." This entry extends that path to *propose* replacements for already-populated channels, gated by user confirmation.
+
+**Idea:** When the user runs Import all and a new candidate from the Source Folder scores a fuzzy match for a channel that already has a file, queue that as a **proposed replacement** rather than silently skipping. Show a confirmation dialog listing each proposed replacement so the user decides what gets updated.
+
+**Dialog behavior:**
+- One row per proposed replacement, showing **channel label**, **current file**, **proposed new file**, and a checkbox at the left. All checkboxes initially **checked**.
+- A **Select all / Deselect all** affordance at the top of the list for bulk action.
+- Footer buttons:
+  - **"Confirm"** — applies only the checked replacements (plus any pure new-channel assignments and direct-copies from the existing flow). Unchecked items still copy into the Song Folder unassigned, same as the unmatched-file path today, so nothing the user picked up gets dropped.
+  - **"Import without auto-mapping"** — copies all candidate files into the Song Folder but applies **no** channel assignments at all (not even the empty-channel ones the current flow would auto-fill). Equivalent to running Import all with Smart Mapping flipped off for this single import.
+- Dialog is **only shown when at least one replacement is being proposed**. If Smart Mapping only finds matches for empty channels (the common case today), the import runs through with no dialog — preserves the friction-free behavior for first imports of a song.
+
+**Heuristic for "this is a replacement candidate":**
+- The new file must fuzzy-match the channel's label *better than or equal to* a defined threshold (reuse `bestChannelForFilename`'s score; require score ≥ some floor to avoid surfacing noisy near-matches as proposed replacements).
+- The new file's filename must be different from the channel's current filename (otherwise it's not a replacement, just the same file).
+- Tie-breaker if multiple new files claim the same channel: highest score wins, others fall into unassigned. Same tie-break rule the current flow uses for empty channels.
+
+**Gating:**
+- Whole feature gates on `userPrefs.smartMappingEnabled` from the previous entry. When off: no fuzzy matching at all, no dialog, files just copy into the Song Folder.
+- When the dialog is shown and the user clicks "Import without auto-mapping," that's a one-time override — the Settings preference is not changed.
+
+**Open questions:**
+- Should the channel-empty case ALSO surface in the dialog (alongside replacements) for consistency, with its checkboxes also defaulting to checked? Probably yes — same UX, single review step before any auto-assignment lands, easier to teach. But it changes the trigger rule to "show the dialog whenever Smart Mapping wants to assign anything," which is more friction on first imports. Worth testing both.
+- Behavior when a replacement is unchecked: should the *new* file still be copied to the Song Folder (just unassigned), or skipped entirely? Default to "copy in, leave unassigned" — same as the unmatched-file path today, so the user can still click-assign it manually if they reconsider.
+- Where do the song's *pending dirty* edits go? Auto-update replacements should land via `applyEdit` so they show in the undo stack and the editor goes dirty + Save-required, same as manual assignments. Don't bypass the edit machinery.
+- This pairs naturally with the "show what changed" entry below — together they cover Smart Mapping *and* let the user audit what it did before saving.
+
+**Captured:** 2026-05-11
+
+---
+
+## Song editor — per-row change indicators
+
+**Where:** `SongEditor.tsx` channel-grid rows. Today the only "you have changes" affordance is the blue dot badge on the Save button / song header that lights up when `editor.current` differs from `editor.baseline`. Once the user clicks Save, all change state is reset.
+
+**Idea:** Add a per-row change indicator that helps the user audit *what specifically* has changed since last save — useful both for hand-edits and (especially) after Smart Mapping has auto-assigned things.
+
+**Visual:**
+- A small **blue dot** to the left of the file column on any channel whose file assignment has changed since the last-saved baseline. Mirror the positioning convention already used for the longest-length stopwatch icon on the same row.
+- On hover, a tooltip describes the delta in plain text:
+  - **Replaced:** `"File_A.wav → File_B.wav"`
+  - **Newly assigned:** `"Unassigned → File_A.wav"`
+  - **Cleared:** `"File_A.wav → Unassigned"`
+- The dot disappears on the next successful Save (i.e. the diff is relative to the current saved baseline, not to "ever").
+
+**Why:** Without this, a user who runs Smart Mapping has no easy way to verify *which* channels Smart Mapping touched short of scanning the whole 25-row grid against memory. Especially valuable for the auto-update-existing-channels path (above) where the change is destructive of prior state — even if the user confirmed the dialog, having a permanent in-grid record until Save lets them catch a misclick. Also useful for plain manual edits — Save's all-or-nothing dot doesn't tell you whether you changed one row or twelve.
+
+**Implementation notes:**
+- Source of truth: diff `editor.current.song.channels[i]` against `editor.baseline.song.channels[i]`. The reducer already keeps both, so this is a pure derived value.
+- One badge component, three message variants based on `(baseline filename, current filename)`:
+  - both set, different → "old → new"
+  - baseline empty, current set → "Unassigned → new"
+  - baseline set, current empty → "old → Unassigned"
+  - both empty → no badge
+  - both equal → no badge
+- Tooltip uses the same hover affordance pattern as the longest-length stopwatch.
+- Don't recompute on every render — `useMemo` the diff against baseline so it's stable across keystrokes elsewhere.
+- This pairs with the auto-update dialog (above) but is standalone-valuable; ship them in either order.
+
+**Open questions:**
+- Should the dot also reflect non-file changes on the row (LVL, PAN edits)? Probably yes for consistency — anything that's not in the baseline gets the dot, and the tooltip lists all changes. But scope-creeps the change-detection logic. Start with file changes only; extend later.
+- Color: use brand-blue (matching the Save-dirty dot) so the user reads "this dot is the same kind of dirty signal as the Save dot, just zoomed in." Alternatively use amber/orange to distinguish "this row changed" from "Save needed." Brand-blue is more honest about the relationship.
+- Should this also appear in the Track Map editor and Playlist editor for parity? Both have the same baseline-vs-current undo machinery — would be a natural extension once the Song editor version is settled.
+
+**Captured:** 2026-05-11
 
 ---
 
@@ -24,79 +178,6 @@ Newest entries on top.
 **UX note:** consider whether to ALSO auto-refresh on window focus. A "user just came back from Logic, files appeared" workflow could be served without a button at all by listening for `visibilitychange` / `focus` and revalidating in the background. The button is the discoverable mechanism; window-focus auto-refresh is the polish layer on top. Probably ship the button first.
 
 **Captured:** 2026-05-13
-
----
-
-## Editor pane — structural refactor (if View Transitions alone isn't enough)
-
-**Status (2026-05-12):** the View Transitions spike has shipped (see `src/lib/viewTransition.ts` + `EditorPane.tsx`'s `view-transition-name: editor-pane`). The browser now crossfades the editor pane on selection change instead of hard-cutting. This may be the whole win — only pick up this entry if VT alone still feels "popping" on async data load (the new editor mounts in a brief loading state which the crossfade captures as its "after" frame).
-
-**Where:** `EditorPane.tsx`. Currently still uses `<SongEditor key={sel.jcsPath} ...>` etc. to force unmount/remount on every selection change. The crossfade smooths the visual cut but the underlying unmount/remount + async data load are still happening.
-
-**Idea:** Restructure so that the shared chrome (header strip, channel grid scaffold, side panels) stays mounted across selection changes, and only the data inside swaps. Paired with the existing VT layer, gives a true content-to-content morph with no empty-loading-state pop.
-
-**Strategies (do in order):**
-1. **Drop the `key` prop, lift data fetching out of the editor.** Move the per-selection load into a hook in `EditorPane` (or one level up) that takes `sel` and returns the parsed model. Editors become controlled components that re-render with new props instead of unmounting.
-2. **Stable shared layout component.** Introduce `<EditorShell>` that owns the header strip + grid skeleton + right-rail slot. Each editor renders *into* it via children/slots. When selection changes, `<EditorShell>` stays mounted; only slot content swaps.
-3. **Suspense + `useDeferredValue(selection)`** so the previous editor stays visible until the new selection's data is ready. Combined with VT, gives no flash of empty content.
-4. **Skeleton placeholders** inside the editor body as a safety net for slow loads (>100ms).
-
-**Order of operations when picking this up:**
-1. Audit each editor's mount-time effects — anything that *relied* on remount semantics (one-shot effects, focus restoration, scroll resets, baseline snapshots in undo stacks) needs to move to an explicit `useEffect([sel])`. The current `key`-based remount is hiding some "happens on selection change" logic that needs to surface deliberately.
-2. Extract `<EditorShell>` shared chrome.
-3. Lift data loading; remove the `key` prop.
-4. Manual QA pass: switch rapidly between every combination of song ↔ playlist ↔ trackMap with and without unsaved changes; confirm the unsaved-changes guard still fires correctly (it currently hangs off the selection-change path in `requestSelect`).
-
-**Captured:** 2026-05-11 (original entry); 2026-05-12 (rewritten after VT spike shipped).
-
----
-
-## Button variant cleanup — extract a reusable Button component with primary/tonal/tertiary tiers
-
-**Where:** Currently ad-hoc Tailwind classes per button across the app. Notable instances: editor-header Save buttons, dialog confirms, Export to USB (now tonal), Change working folder, refresh/gear icon buttons, sidebar "+ New X" affordances, dialog action buttons.
-
-**Idea:** Pull the three implicit tiers — **primary**, **tonal**, **tertiary** (outlined/ghost) — into a single `<Button variant="primary|tonal|tertiary">` component with shared sizing, focus-ring, and disabled-state handling. Migrate existing call sites incrementally.
-
-**Why:** Now that all three tiers are in use (primary for Save / dialog confirm, tonal for Export to USB, tertiary outlined for Change + ghost icon buttons), every site is recomputing the same long Tailwind string. A typo or drift in any one of them creates a subtle inconsistency. Centralizing is just hygiene at this point.
-
-**Tier definitions to encode:**
-- **Primary:** `bg-brand-500 text-white hover:bg-brand-600` — reserved for the active in-context primary action.
-- **Tonal:** `bg-brand-50 text-brand-700 hover:bg-brand-100 dark:bg-brand-950/40 dark:text-brand-300 dark:hover:bg-brand-900/40` — persistent / global actions.
-- **Tertiary:** `border border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-300 dark:hover:bg-zinc-900` — neutral / "Change", outlined.
-
-All three share: rounded-md, px-3 py-1.5, text-sm font-medium, transition, focus-visible accent ring + offset, disabled:opacity-50.
-
-**Open questions:**
-- Danger variant (red destructive)? Not currently used, but Delete actions in the sidebar context menu are close. Worth defining ahead of time so it's one tier among four rather than a bolt-on later.
-- Size variants (xs, sm, md)? Header buttons are slightly chunkier than dialog buttons today. Either standardize on one size or expose `size` as a prop.
-
-**Captured:** 2026-05-12
-
----
-
-## USB export — skip files not referenced by any song
-
-**Where:** Settings (new "Export" section or extend "Defaults") + `export_to_usb` Rust command.
-
-**Idea:** A toggle that limits the bm_media → USB copy to only the audio/MIDI files actually referenced by at least one song's `.jcs`. Saves space + time on USB writes when song folders accumulate unused takes from earlier Logic exports.
-
-**Why:** Source folders inside `bm_media/<song>/` can grow over time as renders are replaced. Currently we copy everything verbatim, which means unused stems still take up space on the BandMate stick. With this on, the working folder stays as the user's archive; the USB stick gets only what BandMate actually needs to play.
-
-**Default:** off. The live-rig reliability principle says we don't change export semantics by default — full-copy stays the safe baseline.
-
-**Implementation notes:**
-- `userPref: exportOnlyReferencedFiles: boolean` in `persistence.ts`.
-- Reference resolution lives TS-side: walk the scan, parse each `.jcs`, build the keep-list from `<file><filename>` and `<midi_file><filename>`, pass to Rust `export_to_usb` as an explicit include-list. The codec is already in TypeScript — no need to port to Rust.
-- The `.jcs` itself always ships, regardless of whether its referenced files exist on disk.
-- `bm_sources/*.jcp` and `bm_trackmaps/*.jcm` always ship — they're not under song folders.
-- `.bandmate-studio.json` sidecars stay excluded (Studio-only; verify in current export code).
-- Filename compare must be **case-insensitive** on macOS — APFS is case-insensitive by default, so the `.jcs` could legitimately say `drum.wav` while the file on disk is `Drum.wav`.
-
-**Pre-export validation extension:** existing validation already flags missing references. Add a summary line: "Skipping N unused file(s) (~M MB)". Surface a warning if turning the toggle on results in zero files being copied for a song (probably a parse error).
-
-**Validation step for `docs/SMOKE-TEST.md`:** once shipped, add an "export with toggle on" scenario. Verify file counts on the USB stick and confirm all songs still play correctly on the actual BandMate with the trimmed set.
-
-**Captured:** 2026-05-11 (from in-session task #17, this conversation)
 
 ---
 
