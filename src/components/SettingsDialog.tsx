@@ -705,8 +705,54 @@ const parsedChangelog: ChangelogEntry[] = parseChangelog(
   changelogSource,
 ).filter((e) => e.version.toLowerCase() !== "unreleased");
 
+/**
+ * GitHub repo coordinates for the "Send feedback…" issue URL. Kept
+ * as a constant rather than a build-time env var because (a) it's
+ * essentially never going to change and (b) hard-coding is one
+ * fewer thing to forget when handing off the project.
+ */
+const GITHUB_REPO_FOR_FEEDBACK = "erm87/bandmate-studio";
+
+/**
+ * Build the pre-filled body for a feedback issue. The user types
+ * over the prompts; the auto-populated app context lives inside a
+ * collapsed `<details>` block so it doesn't dominate the form and
+ * stays out of the way until someone clicks to expand it (which
+ * the maintainer reading the issue tends to do, not the reporter).
+ */
+function buildFeedbackBody(version: string, phaseLabel: string): string {
+  return [
+    "**What happened?**",
+    "",
+    "(describe what you saw)",
+    "",
+    "**What did you expect to happen?**",
+    "",
+    "(describe what you expected)",
+    "",
+    "**Steps to reproduce**",
+    "",
+    "1. ",
+    "2. ",
+    "3. ",
+    "",
+    "---",
+    "",
+    "<details>",
+    "<summary>App context (auto-filled by Send feedback)</summary>",
+    "",
+    `- Version: \`${version}\``,
+    `- Phase: ${phaseLabel}`,
+    "",
+    "</details>",
+    "",
+  ].join("\n");
+}
+
 function AboutSection() {
   const [version, setVersion] = useState<string | null>(null);
+  const [feedbackError, setFeedbackError] = useState<string | null>(null);
+  const [feedbackInFlight, setFeedbackInFlight] = useState(false);
   useEffect(() => {
     let cancelled = false;
     void import("@tauri-apps/api/app").then(({ getVersion }) => {
@@ -718,6 +764,47 @@ function AboutSection() {
       cancelled = true;
     };
   }, []);
+
+  /**
+   * Send feedback handler — composes a pre-filled GitHub Issues
+   * URL and opens it in the user's default browser via the shell
+   * plugin. The user finishes drafting + submits the issue from
+   * their own GitHub account, no auth required on our side.
+   *
+   * Resolves the version fresh at click-time rather than reading
+   * the `version` state so an early click (before getVersion()
+   * resolves) still works — falls back to "unknown" only if
+   * getVersion itself rejects.
+   */
+  const handleSendFeedback = async () => {
+    if (feedbackInFlight) return;
+    setFeedbackInFlight(true);
+    setFeedbackError(null);
+    try {
+      const { getVersion } = await import("@tauri-apps/api/app");
+      const { open } = await import("@tauri-apps/plugin-shell");
+      let v = "unknown";
+      try {
+        v = await getVersion();
+      } catch {
+        // Falls through; "unknown" is fine in the body.
+      }
+      const body = buildFeedbackBody(v, APP_PHASE_LABEL[APP_PHASE]);
+      const url =
+        `https://github.com/${GITHUB_REPO_FOR_FEEDBACK}/issues/new` +
+        `?body=${encodeURIComponent(body)}` +
+        `&labels=${encodeURIComponent("feedback")}`;
+      await open(url);
+    } catch (e) {
+      setFeedbackError(
+        e instanceof Error
+          ? `Couldn't open browser: ${e.message}`
+          : "Couldn't open browser.",
+      );
+    } finally {
+      setFeedbackInFlight(false);
+    }
+  };
 
   return (
     <section className="flex flex-col gap-4">
@@ -740,6 +827,33 @@ function AboutSection() {
           {APP_PHASE_LABEL[APP_PHASE]}
         </dd>
       </dl>
+
+      <div className="flex flex-col gap-2">
+        <p className="max-w-md text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
+          Hit a bug or have a feature request? Your browser will open
+          a pre-filled GitHub issue with the version + phase already
+          captured — fill in what you saw, then submit with your own
+          GitHub account.
+        </p>
+        <div>
+          <Button
+            variant="tonal"
+            size="sm"
+            onClick={() => void handleSendFeedback()}
+            disabled={feedbackInFlight}
+          >
+            {feedbackInFlight ? "Opening…" : "Send feedback…"}
+          </Button>
+        </div>
+        {feedbackError && (
+          <p
+            role="alert"
+            className="rounded-md bg-red-50 px-3 py-2 text-xs text-red-700 dark:bg-red-950 dark:text-red-300"
+          >
+            {feedbackError}
+          </p>
+        )}
+      </div>
 
       {parsedChangelog.length > 0 && (
         <div className="flex flex-col gap-2">

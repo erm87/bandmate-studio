@@ -6,6 +6,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-05-13
+
+### Added
+
+- Settings → About now has a **Send feedback…** button that opens a pre-filled GitHub Issues URL in your default browser. The body includes a feedback template (What happened / What did you expect / Steps to reproduce) plus the app's version and phase auto-captured in a collapsible "App context" block. User submits with their own GitHub account; no service-side secrets in the app.
+
+### Notes
+
+- Closes Beta criterion 5 (in-app feedback path). One Beta blocker remaining: working-folder backwards-compat audit.
+
+
 ## [0.2.1] — 2026-05-13
 
 ### Documentation
