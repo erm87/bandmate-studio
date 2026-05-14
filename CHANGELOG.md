@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.5] — 2026-05-14
+
+### Documentation
+
+- **README rewritten for v0.8.x reality** (Phase 2 of [docs/CLEANUP-PLAN.md](docs/CLEANUP-PLAN.md)). The prior README claimed "Pre-MVP scaffold; UI implementation has not started" — dramatically wrong at v0.8.4 with the working-folder backwards-compat audit closed and most of the original MVP plan shipped. New version captures: current Alpha status with Beta criteria progress (1 of 6 closed, 5 remaining), a one-paragraph value prop + an eight-bullet feature list covering what BMS does beyond BM Loader (Smart Mapping, per-row change indicators, MIDI cleaning via `midly`, sticky export destination, automatic `dot_clean -m` on macOS exports, sample-rate mismatch warnings, keyboard ergonomics with unsaved-changes guard, light/dark/auto color modes), a public-clone-correct Quickstart (drops the `cd improvements/bm-loader-rebuild` prefix that assumed Eric's local monorepo layout), an updated Tech stack row for `midly` and a corrected Windows-distribution note ("Beta criterion (in progress)" vs the old "deferred to v0.2"), a condensed "Why a rewrite (not a fork)" framing of the BM Loader decompilation context with the clean-room discipline note, a new Documentation section indexing the ten key docs (CLAUDE, SPEC, ROADMAP, VERSIONING, COMPAT-TEST, SMOKE-TEST, DEV-SETUP, BACKLOG, CHANGELOG, CLEANUP-PLAN, archive/), and a softened License placeholder pointing at the external-readiness pass (Phase 8). Stale Project-layout tree dropped — Documentation section serves the navigational purpose better and won't drift.
+
+### Notes
+
+- Docs-only PR — no behavior change, no codec changes, no UI changes. Typecheck and the 42-test vitest suite both pass. Removed the broken relative-path link to `../bandmate-custom-build/` (the sibling-directory hint only resolved in Eric's local workspace, not for anyone cloning the public GitHub repo); the project-family mention is preserved as prose without the link.
+
 ## [0.8.4] — 2026-05-14
 
 ### Changed
