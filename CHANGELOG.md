@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.6] — 2026-05-14
+
+### Documentation
+
+- **`docs/` refresh — Phase 5 of [docs/CLEANUP-PLAN.md](docs/CLEANUP-PLAN.md).** Four files updated; `COMPAT-TEST.md` and `ROADMAP.md` were checked for drift and left as-is.
+  - **`docs/CODEC-PARITY-AUDIT.md`** — prepended a status banner annotating the doc as historical: the one-shot 2026-04-28 audit confirmed BMS's codec against the decompiled BM Loader source; finding #1 (`<trackmap>` optionality) was the only real divergence and was fixed; findings #2–#8 are informational with no action required. Ongoing BM Loader parity is now verified via the round-trip protocol in [docs/COMPAT-TEST.md](docs/COMPAT-TEST.md), which closed Beta criterion 1 on 2026-05-14.
+  - **`docs/DEV-SETUP.md`** — fixed three small drift items: the "First run" code block no longer hardcodes Eric's local absolute path (`/Users/ericmorgan/.../Band Live Rig/improvements/bm-loader-rebuild`); the `pnpm test` comment says "(codec round-trip tests)" instead of "(Phase 1)"; the "Code-signing + notarization is on the v0.2 list" line was reframed to point at [docs/ROADMAP.md § v1.x Distribution](docs/ROADMAP.md#distribution-1) where the signing decision actually gets made. Also added a `pnpm bump:*` row to the Common dev commands block with a pointer to [docs/VERSIONING.md](docs/VERSIONING.md).
+  - **`docs/SMOKE-TEST.md`** — added five new check groups for features shipped between v0.4 and v0.8: §1e Smart Mapping settings toggle; §1f USB export skip-unreferenced settings toggle; §2b-1 per-row change indicators; §2c Source Folder Refresh button; §2c-1 Smart Import confirmation dialog; §7b filter for `.bandmate-studio.json` + `.DS_Store` on export; §7c skip-unreferenced behavior at export time.
+  - **`docs/VERSIONING.md`** — corrected §Workflow step 2 from "all three version files" to "all four version files"; added `src-tauri/Cargo.lock` to the listed files (the bump script touches all four and has done since 0.6.x, but the doc lagged).
+
+### Notes
+
+- Docs-only PR — no behavior change, no codec changes, no UI changes. Typecheck and the 42-test vitest suite both pass.
+
 ## [0.8.5] — 2026-05-14
 
 ### Documentation
