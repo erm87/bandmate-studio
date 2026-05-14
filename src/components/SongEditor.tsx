@@ -56,6 +56,10 @@ import { useAppState } from "../state/AppState";
 import { ChannelGrid, type ChannelChange } from "./ChannelGrid";
 import { CleanupConfirmDialog } from "./CleanupConfirmDialog";
 import { SaveConfirmDialog } from "./SaveConfirmDialog";
+import {
+  SmartImportConfirmDialog,
+  type ProposedReplacement,
+} from "./SmartImportConfirmDialog";
 import { SongHeader } from "./SongHeader";
 import { SourceFilesPane } from "./SourceFilesPane";
 import { Toast } from "./Toast";
@@ -98,6 +102,59 @@ interface EditorState {
   future: EditorSnapshot[];
   /** Last saved snapshot. Used to compute `isDirty`. */
   baseline: EditorSnapshot | null;
+}
+
+/**
+ * Snapshot of a partially-decided Import-all run, paused while the
+ * user reviews proposed replacements in `SmartImportConfirmDialog`.
+ *
+ * The bucketing is finalized at the moment `handleImportAll` hands
+ * control to the dialog — every file's destination is already known
+ * except for the user's checkbox decisions on replacements. The
+ * commit step (`commitImport`) merges those decisions into the
+ * pre-computed buckets and performs the eager-copy + applyEdit.
+ *
+ * Keeping the full bucket state out-of-tree (here, not in the
+ * dialog) lets the dialog stay pure and the commit run identically
+ * regardless of whether it was triggered by the no-dialog path,
+ * Confirm, or Import-without-auto-mapping.
+ */
+interface PendingImport {
+  /**
+   * Empty-channel fuzzy-match winners. Auto-applied on Confirm OR
+   * on the no-dialog fast path; ignored on Import-without-auto-mapping.
+   */
+  newAudioByChannel: Map<number, AudioFileInfo>;
+  /**
+   * Empty MIDI slot winner. Same treatment as `newAudioByChannel`
+   * but for the MIDI slot. `null` when the slot is occupied or
+   * no MIDI files are in the import.
+   */
+  newMidi: AudioFileInfo | null;
+  /**
+   * Replacement candidates surfaced in the dialog. Empty in the no-
+   * dialog fast path. Keyed by channel index (0..23 audio, 24 MIDI)
+   * so the dialog's Set<number> result maps back to file lookups
+   * via `replacementFileByChannel`.
+   */
+  replacements: ProposedReplacement[];
+  /**
+   * Resolution table for the replacement decisions. `commitImport`
+   * uses this to find the AudioFileInfo to apply/copy for each
+   * accepted channel index.
+   */
+  replacementFileByChannel: Map<number, AudioFileInfo>;
+  /**
+   * Files that didn't match any channel — copy into song folder
+   * unassigned. Same as today's direct-copy bucket.
+   */
+  directCopy: AudioFileInfo[];
+  /**
+   * Count of source files that were already in the song folder
+   * (skipped from import entirely). Surfaced in the toast when
+   * nothing else was imported.
+   */
+  alreadyInSongCount: number;
 }
 
 /** Cap on how far back undo / forward redo can walk. */
@@ -313,6 +370,24 @@ export function SongEditor({ jcsPath }: Props) {
   const [cleanupCandidates, setCleanupCandidates] = useState<
     AudioFileInfo[] | null
   >(null);
+  /**
+   * Pending Import-all decision state. `null` = no dialog open.
+   *
+   * Populated by `handleImportAll` when Smart Mapping finds at least
+   * one fuzzy-match that would replace an already-assigned channel.
+   * The bucketing is fully computed up-front so dialog approval is
+   * a pure "yes/no per channel" decision — no re-fetching, no re-
+   * scoring, no race against folder-listing refreshes. Cleared when
+   * the dialog closes (commit, override, or cancel).
+   *
+   * For the no-replacement case (the common path on first imports),
+   * `handleImportAll` calls `commitImport` directly and never sets
+   * this state — preserves the friction-free flow per the design
+   * step's "replacements only" decision.
+   */
+  const [pendingImport, setPendingImport] = useState<PendingImport | null>(
+    null,
+  );
   /**
    * Single-slot non-blocking toast. Currently set by the Import-all
    * flow to communicate counts; rendered at the bottom-right of the
@@ -1066,6 +1141,176 @@ export function SongEditor({ jcsPath }: Props) {
    * entirely — same filter the single-file path uses (the BandMate
    * won't play them).
    */
+  /**
+   * Apply a fully-bucketed import. Performs three things in order:
+   *
+   *   1. `applyEdit` — record channel-assignment changes onto the
+   *      undo stack and flip the dirty flag. Empty-channel auto-
+   *      assigns + approved replacements both flow through here so
+   *      the per-row change-dot indicator highlights them uniformly.
+   *   2. Eager-copy every file (assigned + unassigned) into the
+   *      song folder so the Song Folder pane reflects the import
+   *      without waiting on Save.
+   *   3. Toast — count files actually copied; surface failures.
+   *
+   * `pending` carries the bucket decisions made by `handleImportAll`.
+   * `acceptedReplacements` controls which proposed replacements
+   * actually fire — pass an empty Set to skip them all (used by the
+   * "Import without auto-mapping" path, which ALSO suppresses
+   * `pending.newAudioByChannel` / `pending.newMidi` via `applyEmpty`).
+   *
+   * Idempotent w.r.t. song-folder copies: files already on disk get
+   * overwritten by the OS-level copy, matching the single-file path.
+   */
+  const commitImport = useCallback(
+    async (
+      pending: PendingImport,
+      acceptedReplacements: Set<number>,
+      applyEmpty: boolean,
+    ) => {
+      // Resolve which audio assignments to write: empty-channel
+      // winners (gated by applyEmpty) + accepted replacements.
+      const audioAssignments = new Map<number, AudioFileInfo>();
+      if (applyEmpty) {
+        for (const [ch, file] of pending.newAudioByChannel) {
+          audioAssignments.set(ch, file);
+        }
+      }
+      for (const ch of acceptedReplacements) {
+        if (ch === MIDI_CHANNEL_INDEX) continue;
+        const f = pending.replacementFileByChannel.get(ch);
+        if (f) audioAssignments.set(ch, f);
+      }
+
+      // MIDI assignment: either the empty-slot winner (if applyEmpty)
+      // or an accepted MIDI replacement. Mutually exclusive — the
+      // empty path only fires when the slot is unoccupied; the
+      // replacement path only fires when it IS occupied.
+      let midiAssignment: AudioFileInfo | null = null;
+      let isMidiReplacement = false;
+      if (
+        applyEmpty &&
+        pending.newMidi &&
+        !editor.current?.song.midiFile
+      ) {
+        midiAssignment = pending.newMidi;
+      } else if (acceptedReplacements.has(MIDI_CHANNEL_INDEX)) {
+        const f = pending.replacementFileByChannel.get(MIDI_CHANNEL_INDEX);
+        if (f) {
+          midiAssignment = f;
+          isMidiReplacement = true;
+        }
+      }
+
+      if (audioAssignments.size > 0 || midiAssignment) {
+        applyEdit((snap) => {
+          // For replacements, drop the existing channel entry before
+          // adding the new one — otherwise we'd end up with two
+          // SongAudioFile entries claiming the same channel.
+          const replacingChannels = new Set<number>();
+          for (const ch of acceptedReplacements) {
+            if (ch !== MIDI_CHANNEL_INDEX) replacingChannels.add(ch);
+          }
+          const filteredAudio = snap.song.audioFiles.filter(
+            (a) => !replacingChannels.has(a.channel),
+          );
+          const nextAudio = [...filteredAudio];
+          for (const [ch, file] of audioAssignments) {
+            // For empty-channel auto-assigns, mirror the manual
+            // assign defaults (1.0 / 0.5 / unmuted). For replacements,
+            // preserve the prior channel's level/pan/mute so users
+            // don't lose hand-tuned mixer settings when swapping a
+            // file. This matches what most DAW workflows expect.
+            const prior = snap.song.audioFiles.find((a) => a.channel === ch);
+            nextAudio.push({
+              filename: file.filename,
+              channel: ch,
+              level: prior?.level ?? 1.0,
+              pan: prior?.pan ?? 0.5,
+              mute: prior?.mute ?? 1.0,
+            });
+          }
+
+          let nextMidi = snap.song.midiFile;
+          if (midiAssignment) {
+            // Replace OR fill — either way a fresh object lands.
+            nextMidi = {
+              filename: midiAssignment.filename,
+              channel: MIDI_CHANNEL_INDEX,
+            };
+          }
+
+          // Replacements also invalidate any pending-copy entry that
+          // would re-introduce the OLD assignment at Save. (Possible
+          // if the user click-assigned a file and then ran Import all
+          // before saving.) Drop those entries to keep state coherent.
+          let nextPending = snap.pendingCopies;
+          if (replacingChannels.size > 0 || isMidiReplacement) {
+            nextPending = new Map(snap.pendingCopies);
+            for (const ch of replacingChannels) nextPending.delete(ch);
+            if (isMidiReplacement) nextPending.delete(MIDI_CHANNEL_INDEX);
+          }
+
+          return {
+            song: {
+              ...snap.song,
+              audioFiles: nextAudio.sort((a, b) => a.channel - b.channel),
+              midiFile: nextMidi,
+            },
+            pendingCopies: nextPending,
+          };
+        });
+      }
+
+      // Eager-copy EVERY file the import surfaced. Unaccepted
+      // replacements still copy in — they just stay unassigned. Same
+      // friendliness as today's direct-copy bucket for unmatched
+      // files: the file lands in the song folder, ready for click-
+      // assign if the user changes their mind.
+      const allFilesToCopy: AudioFileInfo[] = [
+        ...pending.newAudioByChannel.values(),
+        ...(pending.newMidi ? [pending.newMidi] : []),
+        ...pending.replacementFileByChannel.values(),
+        ...pending.directCopy,
+      ];
+      const failedCopies: string[] = [];
+      if (allFilesToCopy.length > 0) {
+        await Promise.all(
+          allFilesToCopy.map(async (file) => {
+            try {
+              await copyIntoFolder(file.path, songFolder);
+            } catch (e) {
+              // eslint-disable-next-line no-console
+              console.error(
+                `Import-all: failed to copy ${file.filename}:`,
+                e,
+              );
+              failedCopies.push(file.filename);
+            }
+          }),
+        );
+        setSongFolderRefreshKey((k) => k + 1);
+      }
+
+      const totalAttempted = allFilesToCopy.length;
+      if (totalAttempted > 0) {
+        const successCount = totalAttempted - failedCopies.length;
+        let msg = `Imported ${successCount} file${successCount === 1 ? "" : "s"} into the song folder.`;
+        if (failedCopies.length > 0) {
+          msg += ` ${failedCopies.length} failed to copy (see console).`;
+        }
+        setToastMessage(msg);
+      } else if (pending.alreadyInSongCount > 0) {
+        setToastMessage(
+          `All ${pending.alreadyInSongCount} source file${
+            pending.alreadyInSongCount === 1 ? " is" : "s are"
+          } already in the song folder.`,
+        );
+      }
+    },
+    [applyEdit, songFolder, editor],
+  );
+
   const handleImportAll = useCallback(async () => {
     if (!sourceFolder || !draftSong || !editor.current) return;
 
@@ -1124,28 +1369,20 @@ export function SongEditor({ jcsPath }: Props) {
 
     // ---- Bucket assignment ---------------------------------------------
     //
-    // When Smart Mapping is on (default `userPrefs.smartMappingEnabled`):
-    // run the fuzzy-match scoring + most-recent-mtime tiebreaker +
-    // occupied-channel check + MIDI slot claim. Anything that doesn't
-    // land on a channel falls into the direct-copy bucket.
+    // Smart Mapping on (default): fuzzy-match, mtime-tiebreak, split
+    // into three buckets — empty-channel winners (auto-apply), occupied-
+    // channel proposals (route through `SmartImportConfirmDialog`),
+    // and direct-copy leftovers (copy unassigned).
     //
-    // When Smart Mapping is off: skip the matcher entirely. Every file
-    // in newImports goes straight to direct-copy — no channel
-    // assignments, no MIDI auto-claim. The user click-assigns manually
-    // afterward. Same code path the existing non-matching files take,
-    // just applied to everything.
-    const winnerByChannel = new Map<number, AudioFileInfo>();
-    let midiWinner: AudioFileInfo | null = null;
+    // Smart Mapping off: skip the matcher entirely. Every file copies
+    // into the song folder unassigned. No dialog, no auto-assigns.
+    const newAudioByChannel = new Map<number, AudioFileInfo>();
+    const replacementFileByChannel = new Map<number, AudioFileInfo>();
+    const replacementsForDialog: ProposedReplacement[] = [];
+    let newMidi: AudioFileInfo | null = null;
     let directCopy: AudioFileInfo[];
 
     if (state.userPrefs.smartMappingEnabled) {
-      // ---- Phase 1: fuzzy match each WAV to its best-scoring channel.
-      //
-      // `bestChannelForFilename` tokenizes both the filename and each
-      // labeled channel, then scores how strongly the label applies.
-      // Returns null if no label scores above zero — those files fall
-      // through to direct-copy. The MIDI slot is excluded from audio
-      // matching; MIDI files are handled below by kind.
       const skipMidi = new Set([MIDI_CHANNEL_INDEX]);
       type Claim = { file: AudioFileInfo; score: number };
       const claimsByChannel = new Map<number, Claim[]>();
@@ -1163,12 +1400,10 @@ export function SongEditor({ jcsPath }: Props) {
         claimsByChannel.set(match.channel, existing);
       }
 
-      // ---- Tiebreaker: when multiple files claim the same channel,
-      //      the file with the most recent mtime wins. Losers go to
-      //      the direct-copy bucket so they still end up in the song
-      //      folder (just not channel-assigned). modifiedSeconds is
-      //      nullable; treat null as -∞ so it always loses against a
-      //      real timestamp.
+      // Per-channel winner + mtime tiebreak. Losers fall to
+      // direct-copy regardless of whether the channel was empty
+      // or occupied — at-most-one proposal per channel.
+      const winnerByChannel = new Map<number, AudioFileInfo>();
       for (const [ch, claims] of claimsByChannel.entries()) {
         if (claims.length === 1) {
           winnerByChannel.set(ch, claims[0].file);
@@ -1185,153 +1420,148 @@ export function SongEditor({ jcsPath }: Props) {
         }
       }
 
-      // ---- A winning file can't claim a channel that's already
-      //      occupied by an existing assignment in the song. Those
-      //      winners get bumped to direct-copy (non-destructive: the
-      //      user's existing assignment is never overwritten).
-      const currentOccupied = new Set(
-        editor.current.song.audioFiles.map((a) => a.channel),
+      // Partition winners into "empty channel" (auto-assign) vs
+      // "occupied channel, file differs" (propose replacement) vs
+      // "occupied channel, same file" (no-op, file already there).
+      const existingByCh = new Map<number, string>(
+        editor.current.song.audioFiles.map((a) => [a.channel, a.filename]),
       );
-      for (const [ch, file] of [...winnerByChannel.entries()]) {
-        if (currentOccupied.has(ch)) {
-          winnerByChannel.delete(ch);
-          wavUnmatched.push(file);
+      for (const [ch, file] of winnerByChannel.entries()) {
+        const currentFilename = existingByCh.get(ch);
+        if (currentFilename === undefined) {
+          newAudioByChannel.set(ch, file);
+          continue;
         }
+        if (currentFilename === file.filename) {
+          // Same file on the same channel — no-op for the dialog.
+          // The file's already in the song folder (would have been
+          // filtered by `alreadyInSong` above) so nothing to do.
+          // Defensive: still ensure the file is in the copy bucket.
+          continue;
+        }
+        replacementFileByChannel.set(ch, file);
+        replacementsForDialog.push({
+          channelIndex: ch,
+          channelLabel: labels[ch] ?? "",
+          currentFilename,
+          proposedFilename: file.filename,
+        });
       }
 
-      // ---- MIDI: if the slot is empty AND there are MIDI files,
-      //      pick the newest one. Any other MIDI files go to direct-
-      //      copy. If the slot is already occupied, ALL MIDI files
-      //      go to direct-copy.
+      // MIDI: same three-way partition. If slot is empty → auto-fill
+      // newest MIDI. If occupied AND the newest MIDI differs from the
+      // current assignment → propose replacement. Other MIDI files
+      // (overflow) fall to direct-copy.
       const midiFiles = newImports.filter((f) => f.kind === "mid");
-      if (midiFiles.length > 0 && !editor.current.song.midiFile) {
-        const sorted = [...midiFiles].sort(
+      let midiWinnerCandidate: AudioFileInfo | null = null;
+      if (midiFiles.length > 0) {
+        midiWinnerCandidate = [...midiFiles].sort(
           (a, b) =>
             (b.modifiedSeconds ?? -Infinity) -
             (a.modifiedSeconds ?? -Infinity),
-        );
-        midiWinner = sorted[0];
+        )[0];
       }
-      const midiUnmatched = midiFiles.filter((f) => f !== midiWinner);
+      const midiSlotCurrent = editor.current.song.midiFile?.filename;
+      if (midiWinnerCandidate) {
+        if (!midiSlotCurrent) {
+          newMidi = midiWinnerCandidate;
+        } else if (midiSlotCurrent !== midiWinnerCandidate.filename) {
+          replacementFileByChannel.set(
+            MIDI_CHANNEL_INDEX,
+            midiWinnerCandidate,
+          );
+          replacementsForDialog.push({
+            channelIndex: MIDI_CHANNEL_INDEX,
+            channelLabel: "MIDI",
+            currentFilename: midiSlotCurrent,
+            proposedFilename: midiWinnerCandidate.filename,
+          });
+        }
+        // If same filename: no-op (already in song folder).
+      }
+      const midiOverflow = midiFiles.filter(
+        (f) => f !== midiWinnerCandidate,
+      );
 
-      // ---- Final direct-copy bucket: WAVs that didn't match or lost
-      //      their channel claim, plus any MIDI overflow.
-      directCopy = [...wavUnmatched, ...midiUnmatched];
+      directCopy = [...wavUnmatched, ...midiOverflow];
     } else {
-      // Smart Mapping off — every usable new file copies into the
-      // song folder unassigned. The applyEdit branch below short-
-      // circuits because winnerByChannel.size === 0 and midiWinner
-      // is null.
       directCopy = [...newImports];
     }
 
-    // ---- Commit channel assignments via applyEdit (one shot,
-    //      undoable). We've finalized the bucket assignment up-
-    //      front so the updater is a pure state transformation —
-    //      no logic that could re-run differently under StrictMode.
-    //
-    // Note: Import all does NOT add entries to `pendingCopies` for
-    // matched files. The copy happens eagerly below alongside the
-    // direct-copy bucket so the user sees the imports in the Song
-    // Folder pane immediately — no Save round-trip required. The
-    // pendingCopies mechanism stays in place for the single-file
-    // click-to-assign flow, which keeps its assign-now / copy-on-
-    // save semantic.
-    if (winnerByChannel.size > 0 || midiWinner) {
-      applyEdit((snap) => {
-        const nextAudio = [...snap.song.audioFiles];
-        let nextMidi = snap.song.midiFile;
+    // Sort replacements by channel index so the dialog renders in
+    // grid order — matches the editor's mental model and makes the
+    // user's review path predictable.
+    replacementsForDialog.sort((a, b) => a.channelIndex - b.channelIndex);
 
-        for (const [ch, file] of winnerByChannel.entries()) {
-          nextAudio.push({
-            filename: file.filename,
-            channel: ch,
-            level: 1.0,
-            pan: 0.5,
-            mute: 1.0,
-          });
-        }
+    const pending: PendingImport = {
+      newAudioByChannel,
+      newMidi,
+      replacements: replacementsForDialog,
+      replacementFileByChannel,
+      directCopy,
+      alreadyInSongCount: alreadyInSong.length,
+    };
 
-        if (midiWinner && !nextMidi) {
-          nextMidi = {
-            filename: midiWinner.filename,
-            channel: MIDI_CHANNEL_INDEX,
-          };
-        }
-
-        return {
-          song: {
-            ...snap.song,
-            audioFiles: nextAudio.sort((a, b) => a.channel - b.channel),
-            midiFile: nextMidi,
-          },
-          // pendingCopies unchanged — files copy eagerly below.
-          pendingCopies: snap.pendingCopies,
-        };
-      });
+    if (replacementsForDialog.length === 0) {
+      // No-replacement fast path — preserves the friction-free behavior
+      // for first imports of a song (the common case). No dialog, just
+      // apply + copy + toast.
+      await commitImport(pending, new Set(), /* applyEmpty */ true);
+      return;
     }
 
-    // ---- Eager-copy: matched winners + MIDI winner + direct-copy
-    //      ALL get copied into the song folder right now so the
-    //      Song Folder pane reflects the import without waiting on
-    //      Save. Per-file errors are logged but don't fail the batch
-    //      (matches the original direct-copy behavior). Any failure
-    //      leaves the channel assignment intact but no file on disk
-    //      — the user can re-import the specific file via click-to-
-    //      assign from the Source Folder pane.
-    const eagerCopyFiles: AudioFileInfo[] = [
-      ...winnerByChannel.values(),
-      ...(midiWinner ? [midiWinner] : []),
-      ...directCopy,
-    ];
-    const failedCopies: string[] = [];
-    if (eagerCopyFiles.length > 0) {
-      await Promise.all(
-        eagerCopyFiles.map(async (file) => {
-          try {
-            await copyIntoFolder(file.path, songFolder);
-          } catch (e) {
-            // eslint-disable-next-line no-console
-            console.error(`Import-all: failed to copy ${file.filename}:`, e);
-            failedCopies.push(file.filename);
-          }
-        }),
-      );
-      setSongFolderRefreshKey((k) => k + 1);
-    }
-
-    // ---- Toast — communicate the outcome. Now that all imports
-    //      copy eagerly, the "Imported N files into the song folder"
-    //      message is literally true (no Save needed). If any copies
-    //      failed mid-batch, append a count so the user knows to
-    //      check the console + the Song Folder pane.
-    const matchedCount = winnerByChannel.size;
-    const midiAssignedCount = midiWinner ? 1 : 0;
-    const totalImported =
-      matchedCount + midiAssignedCount + directCopy.length;
-    if (totalImported > 0) {
-      const successCount = totalImported - failedCopies.length;
-      let msg = `Imported ${successCount} file${successCount === 1 ? "" : "s"} into the song folder.`;
-      if (failedCopies.length > 0) {
-        msg += ` ${failedCopies.length} failed to copy (see console).`;
-      }
-      setToastMessage(msg);
-    } else if (alreadyInSong.length > 0) {
-      setToastMessage(
-        `All ${alreadyInSong.length} source file${
-          alreadyInSong.length === 1 ? " is" : "s are"
-        } already in the song folder.`,
-      );
-    }
+    // At least one replacement — surface the dialog. `commitImport`
+    // fires from the dialog's onConfirm / onImportWithoutAutoMapping
+    // handlers below.
+    setPendingImport(pending);
   }, [
     sourceFolder,
     songFolder,
     draftSong,
-    applyEdit,
+    commitImport,
     labels,
     editor,
     state.userPrefs.smartMappingEnabled,
   ]);
+
+  /**
+   * Dialog callback: user clicked Confirm. Apply the accepted
+   * replacements alongside any pre-computed empty-channel winners.
+   * Unchecked replacements still copy their files in (unassigned)
+   * via the eager-copy step.
+   */
+  const handleConfirmSmartImport = useCallback(
+    async (acceptedChannels: Set<number>) => {
+      if (!pendingImport) return;
+      const snapshot = pendingImport;
+      setPendingImport(null);
+      await commitImport(snapshot, acceptedChannels, /* applyEmpty */ true);
+    },
+    [pendingImport, commitImport],
+  );
+
+  /**
+   * Dialog callback: user clicked "Import without auto-mapping" — a
+   * one-time opt-out. Applies no channel assignments (not even the
+   * empty-channel winners). All candidate files still copy into the
+   * song folder so the user can click-assign manually.
+   */
+  const handleImportWithoutAutoMapping = useCallback(async () => {
+    if (!pendingImport) return;
+    const snapshot = pendingImport;
+    setPendingImport(null);
+    await commitImport(snapshot, new Set(), /* applyEmpty */ false);
+  }, [pendingImport, commitImport]);
+
+  /**
+   * Dialog callback: user clicked Cancel / hit Esc / clicked
+   * backdrop. Abort the import entirely — no copies, no assigns. The
+   * source files remain in the source folder, ready for another
+   * Import all run.
+   */
+  const handleCancelSmartImport = useCallback(() => {
+    setPendingImport(null);
+  }, []);
 
   /**
    * "Clean up…" button on the Song Folder tab. Re-fetches the folder
@@ -1938,6 +2168,15 @@ export function SongEditor({ jcsPath }: Props) {
         files={cleanupCandidates ?? []}
         onConfirm={handleConfirmCleanup}
         onClose={() => setCleanupCandidates(null)}
+      />
+
+      <SmartImportConfirmDialog
+        isOpen={pendingImport !== null}
+        songName={songName}
+        replacements={pendingImport?.replacements ?? []}
+        onConfirm={(accepted) => void handleConfirmSmartImport(accepted)}
+        onImportWithoutAutoMapping={() => void handleImportWithoutAutoMapping()}
+        onCancel={handleCancelSmartImport}
       />
 
       {toastMessage && (

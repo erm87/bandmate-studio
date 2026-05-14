@@ -81,39 +81,6 @@ https://github.com/erm87/bandmate-studio/issues/new
 
 ---
 
-## Smart Mapping — auto-update existing channel assignments on re-import
-
-**Where:** `SongEditor.tsx` → `handleImportAll` (currently around line 1014). Today the fuzzy matcher (`bestChannelForFilename` in `lib/sourceMatch.ts`) **only assigns to empty channels** — the in-code comment explicitly says "existing assignments are never overwritten." This entry extends that path to *propose* replacements for already-populated channels, gated by user confirmation.
-
-**Idea:** When the user runs Import all and a new candidate from the Source Folder scores a fuzzy match for a channel that already has a file, queue that as a **proposed replacement** rather than silently skipping. Show a confirmation dialog listing each proposed replacement so the user decides what gets updated.
-
-**Dialog behavior:**
-- One row per proposed replacement, showing **channel label**, **current file**, **proposed new file**, and a checkbox at the left. All checkboxes initially **checked**.
-- A **Select all / Deselect all** affordance at the top of the list for bulk action.
-- Footer buttons:
-  - **"Confirm"** — applies only the checked replacements (plus any pure new-channel assignments and direct-copies from the existing flow). Unchecked items still copy into the Song Folder unassigned, same as the unmatched-file path today, so nothing the user picked up gets dropped.
-  - **"Import without auto-mapping"** — copies all candidate files into the Song Folder but applies **no** channel assignments at all (not even the empty-channel ones the current flow would auto-fill). Equivalent to running Import all with Smart Mapping flipped off for this single import.
-- Dialog is **only shown when at least one replacement is being proposed**. If Smart Mapping only finds matches for empty channels (the common case today), the import runs through with no dialog — preserves the friction-free behavior for first imports of a song.
-
-**Heuristic for "this is a replacement candidate":**
-- The new file must fuzzy-match the channel's label *better than or equal to* a defined threshold (reuse `bestChannelForFilename`'s score; require score ≥ some floor to avoid surfacing noisy near-matches as proposed replacements).
-- The new file's filename must be different from the channel's current filename (otherwise it's not a replacement, just the same file).
-- Tie-breaker if multiple new files claim the same channel: highest score wins, others fall into unassigned. Same tie-break rule the current flow uses for empty channels.
-
-**Gating:**
-- Whole feature gates on `userPrefs.smartMappingEnabled` from the previous entry. When off: no fuzzy matching at all, no dialog, files just copy into the Song Folder.
-- When the dialog is shown and the user clicks "Import without auto-mapping," that's a one-time override — the Settings preference is not changed.
-
-**Open questions:**
-- Should the channel-empty case ALSO surface in the dialog (alongside replacements) for consistency, with its checkboxes also defaulting to checked? Probably yes — same UX, single review step before any auto-assignment lands, easier to teach. But it changes the trigger rule to "show the dialog whenever Smart Mapping wants to assign anything," which is more friction on first imports. Worth testing both.
-- Behavior when a replacement is unchecked: should the *new* file still be copied to the Song Folder (just unassigned), or skipped entirely? Default to "copy in, leave unassigned" — same as the unmatched-file path today, so the user can still click-assign it manually if they reconsider.
-- Where do the song's *pending dirty* edits go? Auto-update replacements should land via `applyEdit` so they show in the undo stack and the editor goes dirty + Save-required, same as manual assignments. Don't bypass the edit machinery.
-- This pairs naturally with the "show what changed" entry below — together they cover Smart Mapping *and* let the user audit what it did before saving.
-
-**Captured:** 2026-05-11
-
----
-
 ## Source Folder tab — manual refresh button
 
 **Where:** `SourceFilesPane.tsx` — `SourceFolderHeaderActions` (the Import all / Clear / Change… row).
