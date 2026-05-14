@@ -1,83 +1,79 @@
 # BandMate Studio
 
-A modern, open-source replacement for JoeCo's **BM Loader** companion app. Reads and writes the same file formats (`.jcm` track maps, `.jcs` songs, `.jcp` playlists, USB layout under `bm_media/`) so the BandMate hardware sees a fully-compatible playfile USB.
+A modern desktop companion for the JoeCo BandMate hardware — drop-in replacement for stock **BM Loader** with a faster shell, live UI ergonomics, and a few features BM Loader doesn't have. Built on Tauri (Rust) + React + TypeScript + Tailwind.
 
-Built for Eric's Brigades rig as part of the [bandmate-custom-build](../bandmate-custom-build/) project family.
+Reads and writes the same on-disk formats stock BM Loader produces — `.jcm` track maps, `.jcs` songs, `.jcp` playlists, and the `bm_media/` USB layout — so a BandMate Studio-produced USB stick is fully compatible with one produced by stock BM Loader. The same Working Folder can be edited by either app across sessions.
 
-## Why this exists
-
-JoeCo's stock BM Loader is a Python 3.12 + PySimpleGUI v2 desktop app that's grown rough at the edges:
-
-- Outdated UI, no drag-to-reorder, no keyboard shortcuts (Delete, Cmd+S, etc.)
-- The `48 kHz` radio button reverts to `44.1 kHz` after confirming a New Song dialog
-- Random freezes during USB copy (single-threaded UI blocks on long file ops)
-- Slow startup (~5 s of PyInstaller archive extraction every launch)
-- App icon reverts to a generic Python image because the bundle ID is `com.domain.project` (PyInstaller default placeholder)
-- No `dot_clean` integration on macOS (Eric has to remember to run it manually after every USB write)
-- No bulk editing across songs
-
-JoeCo's source isn't available, but a patched build of `pycdc` recovered ~88% of the app's functions cleanly — see [decompiled/README.md](./decompiled/README.md). The recovered `playlistparse.py` (notably `Song.loadSong`/`saveSong` and `PlayList.loadPlaylist`/`savePlaylist`) is the authoritative reference for the file-format SPEC. We're still building a fresh app rather than patching the original — the recovered source is enough to validate behavior, but the UI is dated enough that a rewrite gives us more leverage than a patch.
+Built for Eric's Brigades live rig, alongside a parallel custom BandMate firmware fork (`bandmate-custom-build`).
 
 ## Status
 
-**Pre-MVP scaffold.** Project structure, file-format spec, and phased work plan are written; UI implementation has not started.
+**Alpha.** Active feature development; single-user (Eric + band) on the live rig. Breaking changes can land at any minor bump until the Beta phase opens.
 
-See [docs/archive/MVP-PLAN-2026-05-11.md](./docs/archive/MVP-PLAN-2026-05-11.md) for the original phased v0.1 checklist (archival — most items have shipped; current planning lives in [docs/ROADMAP.md](./docs/ROADMAP.md)) and [SPEC.md](./SPEC.md) for the file-format reference (the contract between this app and the BandMate hardware).
+Beta criterion #1 (BM Loader working-folder backwards compatibility) is **closed** as of [2026-05-14](./CHANGELOG.md); 5 of 6 criteria remain — see [docs/ROADMAP.md § Beta criteria](./docs/ROADMAP.md). Active polish items live in [BACKLOG.md](./BACKLOG.md).
+
+## What it does
+
+The core workflow mirrors BM Loader's: pick a **Working Folder**, create Songs / Playlists / Track Maps inside it, assign WAVs to channels, then export to a USB stick the BandMate plays back on stage. Round-trip compatibility with BM Loader is the unbreakable invariant — saved files are byte-stable for the deterministic portions of each format.
+
+Beyond that, BandMate Studio adds:
+
+- **Smart Mapping** — fuzzy-match incoming WAV filenames to channel labels on import; a confirmation dialog lists every proposed replacement (`current → proposed`) so the user can approve, deselect, or override per row.
+- **Per-row change indicators** in the Song editor — small dots show which channels are dirty since last save, with a tooltip describing the specific change.
+- **MIDI cleaning on import** — runs imported `.mid` files through the `midly` SMF parser to strip non-essential meta events (Kemper-bound MIDI must contain only events the device responds to).
+- **Sticky export destination** — remembers the last USB stick used; second-time exports skip the picker.
+- **Automatic `dot_clean -m` on macOS exports** — the BandMate hangs on AppleDouble `._*` files; BMS strips them as part of the export pipeline rather than relying on the user to remember.
+- **Sample-rate mismatch warnings** — flags WAVs whose sample rate doesn't match the song's, both at assignment and on save.
+- **Cmd+S, drag-to-reorder, Delete-to-clear, ESC** — keyboard ergonomics BM Loader doesn't have, plus an unsaved-changes guard on every navigation boundary.
+- **Light / Dark / Auto color modes** — system-aware theme that follows the OS appearance setting live.
+
+The full feature log is in [CHANGELOG.md](./CHANGELOG.md). The on-disk file-format reference is [SPEC.md](./SPEC.md).
+
+## Quickstart
+
+```bash
+pnpm install        # node deps (React, Vite, Tailwind, Tauri JS bindings)
+pnpm tauri dev      # native window with HMR; first run is slow (~5 min for cargo)
+```
+
+Detailed toolchain setup (Node 20+, Rust, Xcode CLT) lives in [docs/DEV-SETUP.md](./docs/DEV-SETUP.md). For the per-PR version-bump + CHANGELOG workflow, see [docs/VERSIONING.md](./docs/VERSIONING.md).
 
 ## Tech stack
 
 | Layer | Choice | Why |
 |---|---|---|
 | Desktop shell | [Tauri](https://tauri.app/) (Rust) | ~15 MB bundle vs Electron's 150 MB; near-instant startup; native file dialogs and OS integration without Electron's security caveats. |
-| UI | React + TypeScript | Eric is more familiar with React than Python or Qt; future JoeCo handoff is easier with a popular UI framework. |
+| UI | React + TypeScript | More familiar than Python or Qt; future JoeCo handoff is easier with a popular UI framework. |
 | Styling | Tailwind CSS | Fast iteration, consistent design tokens, easy dark-mode support. |
 | Build | Vite | Modern frontend tooling; fast dev server with HMR. |
-| Audio probing | Rust [`hound`](https://docs.rs/hound/) crate | Read WAV headers to detect mono vs stereo, sample rate, duration. Simple, reliable. |
-| Distribution | macOS first (`.dmg`) | Eric's rig is Mac. Windows packaging deferred to v0.2 (Tauri makes this almost free). |
+| Audio probing | Rust [`hound`](https://docs.rs/hound/) crate | Read WAV headers (mono/stereo, sample rate, duration). Simple, reliable. |
+| MIDI cleaning | Rust [`midly`](https://docs.rs/midly/) crate | Zero-copy SMF parser/writer; used to strip non-essential meta events from imported MIDI files. |
+| Distribution | macOS first (`.dmg`) | Eric's rig is Mac. Windows is a Beta criterion (in progress). |
 
-The Rust toolchain is invisible to anyone using BandMate Studio — they get a normal `.dmg`. Only the dev machine needs Rust + Node.
+The Rust toolchain is invisible to users — they get a normal `.dmg`. Only the dev machine needs Rust + Node.
 
-## Local dev
+## Why a rewrite (not a fork)
 
-See [docs/DEV-SETUP.md](./docs/DEV-SETUP.md) for the step-by-step. TL;DR:
+JoeCo's stock BM Loader is a Python 3.12 + PySimpleGUI v2 desktop app whose source isn't public. A patched build of `pycdc` recovered ~88% of the app's functions cleanly (see [decompiled/README.md](./decompiled/README.md) — gitignored research material). That recovery is enough to validate file-format behavior against, but the codebase is dated enough that a fresh build gives us more leverage than a patch: a smaller, faster shell; live UI ergonomics (drag-to-reorder, keyboard shortcuts, dark mode); and clean-room compatibility with the on-disk formats.
 
-```bash
-# one-time toolchain setup on your Mac
-brew install node
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+Discipline note: BandMate Studio is a clean-room reimplementation. Code is never pasted from the recovered source; every codec function is reimplemented against [SPEC.md](./SPEC.md) and round-tripped through real BM-Loader-produced fixtures in [src/codec/\_\_fixtures\_\_/](./src/codec/__fixtures__/).
 
-# this repo
-cd improvements/bm-loader-rebuild
-pnpm install        # node deps (React, Vite, Tailwind, Tauri JS bindings)
-pnpm tauri dev      # spin up dev server with hot-reload + a live macOS app window
-```
+## Documentation
 
-## Project layout
+- [CLAUDE.md](./CLAUDE.md) — orientation guide for Claude Code sessions; architecture, codec invariants, the reliability principle.
+- [SPEC.md](./SPEC.md) — on-disk format reference (`.jcm`, `.jcs`, `.jcp`, USB layout). The contract between BMS and the BandMate hardware.
+- [docs/ROADMAP.md](./docs/ROADMAP.md) — Alpha / Beta / Stable goals and criteria.
+- [docs/VERSIONING.md](./docs/VERSIONING.md) — per-PR version-bump workflow and phase semantics.
+- [docs/COMPAT-TEST.md](./docs/COMPAT-TEST.md) — manual audit protocol for verifying BM Loader interoperability.
+- [docs/SMOKE-TEST.md](./docs/SMOKE-TEST.md) — pre-release smoke test plan.
+- [docs/DEV-SETUP.md](./docs/DEV-SETUP.md) — first-time toolchain setup on macOS.
+- [BACKLOG.md](./BACKLOG.md) — active polish / feature items not yet scheduled.
+- [CHANGELOG.md](./CHANGELOG.md) — release-by-release history.
+- [docs/CLEANUP-PLAN.md](./docs/CLEANUP-PLAN.md) — the repo-hygiene phased plan currently being executed.
+- [docs/archive/](./docs/archive/) — historical planning documents kept for reference.
 
-```
-bm-loader-rebuild/
-├── README.md                # ← you are here
-├── SPEC.md                  # .jcm / .jcs / .jcp file format reference
-├── docs/
-│   └── DEV-SETUP.md         # install Rust + Node, run locally
-├── package.json             # frontend deps (React, Vite, Tailwind, Tauri)
-├── vite.config.ts
-├── tailwind.config.js
-├── tsconfig.json
-├── index.html
-├── src/                     # React frontend
-│   ├── main.tsx             # React entry
-│   ├── App.tsx              # top-level layout
-│   ├── index.css            # Tailwind imports
-│   └── types.ts             # TypeScript types matching SPEC.md
-└── src-tauri/               # Rust backend
-    ├── Cargo.toml
-    ├── tauri.conf.json
-    ├── build.rs
-    └── src/
-        └── main.rs          # Rust entry, command handlers
-```
+## License & contribution
 
-## License
+License: TBD. A permissive license (MIT or Apache 2.0) will be finalized in the external-readiness pass described in [docs/CLEANUP-PLAN.md § Phase 8](./docs/CLEANUP-PLAN.md).
 
-MIT (TBD — Eric's call, can be relicensed as needed if JoeCo ever adopts).
+External contributions aren't yet being solicited — BMS is in private alpha. If you're a BM Loader user interested in dogfooding the Beta when it opens, reach out to Eric.
