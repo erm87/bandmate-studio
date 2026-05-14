@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.2] — 2026-05-14
+
+### Documentation
+
+- **Added `CLAUDE.md` at the repo root** — onboarding guide for Claude Code sessions in this repo. Covers the common dev commands (`pnpm tauri dev/build`, `pnpm test`, `pnpm typecheck`, `pnpm bump:*`), the JS/Rust architecture split (FS I/O in Rust to bypass Tauri's scope-gating; codec pure-TS so it tests in Node), the codec invariants from `SPEC.md` (CRLF on `.jcm`, canonical write order on `.jcs`, lenient-read/strict-write), the AppState reducer + ESC chain + unsaved-changes guard, the Working Folder concept, and pointers to BM Loader byte-parity as a Beta criterion. Calls out the reliability principle (live-rig stability bias), the phase model with pointers to ROADMAP criteria, the per-PR version-bump workflow, and the gitignored `decompiled/` `pycdc` recovery as a clean-room reading reference.
+
 ## [0.8.1] — 2026-05-14
 
 ### Documentation
