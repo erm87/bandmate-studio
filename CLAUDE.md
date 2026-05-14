@@ -53,9 +53,13 @@ pnpm test               # vitest, runs the codec round-trip tests against src/co
 pnpm test -- jcm        # filter to one file (vitest pattern match)
 pnpm typecheck          # tsc --noEmit; project also runs `tsc -b` in `pnpm build`
 pnpm bump:patch|minor|major   # see docs/VERSIONING.md — must run before each merge
+pnpm check:versions     # verify the four version files agree (CI runs this on every PR)
+pnpm check:changelog    # verify CHANGELOG has a non-Unreleased entry for the current version
 ```
 
 Vitest is configured for Node environment (codec is pure-functional and DOM-free). There is no JS lint step. The Rust side has no separate test command — `cargo test` is available but not currently wired into scripts.
+
+CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs `pnpm typecheck`, `pnpm test`, both `check:*` scripts, and `cargo check` on every PR against `main`. Phase H1 of [docs/HYGIENE-PLAN.md](docs/HYGIENE-PLAN.md).
 
 ## Dev server
 

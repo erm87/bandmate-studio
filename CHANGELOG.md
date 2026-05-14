@@ -6,6 +6,24 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-05-14
+
+### Added
+
+- **CI minimum viable — Phase H1 of [docs/HYGIENE-PLAN.md](docs/HYGIENE-PLAN.md).** New GitHub Actions workflow at [`.github/workflows/ci.yml`](.github/workflows/ci.yml) gates every PR against `main` on five checks, plus two new local scripts surfacing the same checks on demand.
+  - `pnpm typecheck` — `tsc --noEmit`.
+  - `pnpm test` — the 42-test vitest codec round-trip suite.
+  - `pnpm check:versions` — new script at [`scripts/check-version-sync.mjs`](scripts/check-version-sync.mjs); verifies `package.json`, `src-tauri/tauri.conf.json`, `src-tauri/Cargo.toml`, and the `bandmate-studio` entry in `src-tauri/Cargo.lock` all show the same version string. Exits non-zero with each file's actual version on mismatch.
+  - `pnpm check:changelog` — new script at [`scripts/check-changelog-entry.mjs`](scripts/check-changelog-entry.mjs); verifies CHANGELOG.md has a `## [<version>] — YYYY-MM-DD` section for the current `package.json` version, and that the section is a sibling of `## [Unreleased]` rather than content nested under it. Catches the PR #34 failure mode (entries dumped under `## [Unreleased]` with no version heading) — documented as a load-bearing test case in the script header.
+  - `cargo check --locked` — fastest Rust-side smoke that the workspace still compiles.
+
+### Notes
+
+- Bumped MINOR rather than PATCH (recent precedent for non-user-visible PRs has been PATCH): this adds a new project-level mechanism — CI gating + two new scripts — not just docs. Deliberate call against recent cadence; see PR description.
+- **Acceptance test deferred to a follow-up.** Phase H1's acceptance criterion ("deliberately break a version file, verify CI fails") requires a second PR after this one lands and the workflow has run at least once on `main`. Captured in the PR description; not gated by this PR.
+- **GitHub branch protection not configured by this PR.** Setting "Require status checks to pass before merging" → `ci` requires admin-level access in the GitHub UI; Eric will configure it after the workflow runs successfully at least once.
+- CI runs on `ubuntu-latest` with the standard Tauri 2.x Linux system deps (`libwebkit2gtk-4.1-dev`, `libsoup-3.0-dev`, etc.). If those deps misbehave on the first run, the fix is workflow-side (swap to `macos-latest` or adjust deps), not code-side.
+
 ## [0.8.10] — 2026-05-14
 
 ### Documentation
