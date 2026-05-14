@@ -230,7 +230,7 @@ We'll preserve this exact convention so a user can switch back and forth between
 
 ## What we explicitly do NOT replicate
 
-- The BM Loader's three-tab layout (Track Loader / Playlist Editor / Uploader). We're free to redesign IA — see MVP-PLAN.md.
+- The BM Loader's three-tab layout (Track Loader / Playlist Editor / Uploader). We're free to redesign IA.
 - Two-step "Browse → Set" working-folder pattern. One step is enough.
 - The "<< Copy" / "<< Copy All" buttons for moving from source to destination. Drag-drop is the modern equivalent.
 - The blue up/down arrow row buttons. Drag-to-reorder replaces them.
