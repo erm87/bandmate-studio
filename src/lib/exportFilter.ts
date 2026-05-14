@@ -151,12 +151,3 @@ export async function computeSkipSummary(
 
   return { fileCount, byteCount, songsWithZeroFiles };
 }
-
-/** Format a byte count as a short human-readable string. */
-export function formatExportBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024)
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-}

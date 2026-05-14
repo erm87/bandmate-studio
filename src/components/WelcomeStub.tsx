@@ -1,7 +1,6 @@
 /**
  * Default right-pane content when no sidebar item is selected.
- * Shows project-level summary stats. Same data as the Phase 2
- * MainPlaceholder; renamed for clarity.
+ * Shows project-level summary stats.
  */
 
 import { useAppState } from "../state/AppState";

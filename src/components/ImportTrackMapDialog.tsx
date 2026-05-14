@@ -34,6 +34,7 @@ import {
 } from "../fs/workingFolder";
 import { useAppState } from "../state/AppState";
 import { cn } from "../lib/cn";
+import { formatBytes } from "../lib/bytes";
 import { Button } from "./Button";
 
 type CollisionMode = "rename" | "overwrite" | "skip";
@@ -98,12 +99,6 @@ function validateRenameTarget(
     return "A track map with this filename already exists.";
   }
   return null;
-}
-
-function formatSize(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 function formatModified(seconds: number | null): string {
@@ -489,7 +484,7 @@ export function ImportTrackMapDialog({ isOpen, onClose }: Props) {
                             {map.filename}
                           </span>
                           <span className="text-meta text-zinc-500 dark:text-zinc-400">
-                            {formatSize(map.sizeBytes)}
+                            {formatBytes(map.sizeBytes)}
                             {map.modifiedSeconds !== null && (
                               <>
                                 {" · "}

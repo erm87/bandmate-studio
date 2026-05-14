@@ -18,6 +18,7 @@
 
 import type { TrackMapSummary } from "../fs/types";
 import { cn } from "../lib/cn";
+import { formatDuration } from "../lib/duration";
 import { Button } from "./Button";
 
 interface Props {
@@ -175,22 +176,6 @@ export function PlaylistHeader({
       )}
     </header>
   );
-}
-
-/** Format a total-seconds value as `m:ss` (or `h:mm:ss` if ≥1 hour). */
-function formatDuration(totalSeconds: number): string {
-  const seconds = Math.max(0, Math.floor(totalSeconds));
-  if (seconds < 3600) {
-    const mm = Math.floor(seconds / 60);
-    const ss = (seconds % 60).toString().padStart(2, "0");
-    return `${mm}:${ss}`;
-  }
-  const hh = Math.floor(seconds / 3600);
-  const mm = Math.floor((seconds % 3600) / 60)
-    .toString()
-    .padStart(2, "0");
-  const ss = (seconds % 60).toString().padStart(2, "0");
-  return `${hh}:${mm}:${ss}`;
 }
 
 function SampleRateRadio({
