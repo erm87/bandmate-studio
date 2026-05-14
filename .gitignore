@@ -47,5 +47,9 @@ src-tauri/.cargo-lock
 # Reverse-engineered BM Loader reference (research material; not part of the rebuild)
 decompiled/
 
+# Local audit / parity-test scratch outputs (see docs/EXPORT-PARITY-TEST.md).
+# Each run drops a timestamped folder here; nothing in this dir is part of the codebase.
+audit-runs/
+
 # TypeScript incremental build cache (any tsbuildinfo file, not just the root one)
 *.tsbuildinfo
