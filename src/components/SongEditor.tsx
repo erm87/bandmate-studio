@@ -53,7 +53,7 @@ import { bestChannelForFilename } from "../lib/sourceMatch";
 import { diffSongs } from "../lib/snapshotDiff";
 import type { AudioFileInfo } from "../fs/types";
 import { useAppState } from "../state/AppState";
-import { ChannelGrid } from "./ChannelGrid";
+import { ChannelGrid, type ChannelChange } from "./ChannelGrid";
 import { CleanupConfirmDialog } from "./CleanupConfirmDialog";
 import { SaveConfirmDialog } from "./SaveConfirmDialog";
 import { SongHeader } from "./SongHeader";
@@ -345,6 +345,61 @@ export function SongEditor({ jcsPath }: Props) {
     }
     return result;
   }, [trackMap]);
+
+  /**
+   * Per-channel file-assignment delta vs the editor's last-saved
+   * baseline. Drives the small change-dot indicator in the channel
+   * grid. Recomputed on every snapshot edit (the cost is trivial —
+   * one pass over <=25 channels) and resets to empty on save, since
+   * the save handler updates `baseline` to match `current`.
+   *
+   * Scope: file assignment only (filename for audio rows, midiFile
+   * for the MIDI row). Per-channel Lvl / Pan / Mute tweaks are not
+   * surfaced as dots — those are secondary edits and would clutter
+   * the at-a-glance scan that's the whole point of this indicator.
+   */
+  const channelChanges = useMemo<Map<number, ChannelChange>>(() => {
+    const m = new Map<number, ChannelChange>();
+    const current = editor.current?.song;
+    const baseline = editor.baseline?.song;
+    if (!current || !baseline) return m;
+    // Audio channels.
+    const baseByCh = new Map<number, string>(
+      baseline.audioFiles.map((f) => [f.channel, f.filename]),
+    );
+    const curByCh = new Map<number, string>(
+      current.audioFiles.map((f) => [f.channel, f.filename]),
+    );
+    for (let ch = 0; ch < MIDI_CHANNEL_INDEX; ch++) {
+      const before = baseByCh.get(ch);
+      const after = curByCh.get(ch);
+      if (before === after) continue;
+      if (before && after) {
+        m.set(ch, { kind: "replaced", before, after });
+      } else if (after) {
+        m.set(ch, { kind: "newly", after });
+      } else if (before) {
+        m.set(ch, { kind: "cleared", before });
+      }
+    }
+    // MIDI slot.
+    const baseMidi = baseline.midiFile?.filename;
+    const curMidi = current.midiFile?.filename;
+    if (baseMidi !== curMidi) {
+      if (baseMidi && curMidi) {
+        m.set(MIDI_CHANNEL_INDEX, {
+          kind: "replaced",
+          before: baseMidi,
+          after: curMidi,
+        });
+      } else if (curMidi) {
+        m.set(MIDI_CHANNEL_INDEX, { kind: "newly", after: curMidi });
+      } else if (baseMidi) {
+        m.set(MIDI_CHANNEL_INDEX, { kind: "cleared", before: baseMidi });
+      }
+    }
+    return m;
+  }, [editor.current, editor.baseline]);
 
   // ---- Snapshot mutators (undo-aware) -------------------------------------
 
@@ -1734,6 +1789,7 @@ export function SongEditor({ jcsPath }: Props) {
         <ChannelGrid
           song={draftSong}
           channelLabels={labels}
+          channelChanges={channelChanges}
           longestFilename={longestFilename}
           longestDurationSeconds={
             draftSong.lengthSamples / draftSong.sampleRate

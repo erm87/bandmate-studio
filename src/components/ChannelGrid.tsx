@@ -30,10 +30,37 @@ import {
   setDragPayload,
 } from "../lib/dnd";
 
+/**
+ * A single channel's delta against the editor's last-saved baseline,
+ * used to render the small change-dot indicator on changed rows.
+ *
+ *   - `replaced`: the channel had a file, and now has a different file
+ *   - `newly`:    the channel was empty, and now has a file
+ *   - `cleared`:  the channel had a file, and now is empty
+ *
+ * Only file changes are tracked for now — per-channel Lvl/Pan/Mute
+ * tweaks are not surfaced as dots (file assignment is the dominant
+ * thing users want to scan for; secondary param tweaks would clutter).
+ */
+export type ChannelChange =
+  | { kind: "replaced"; before: string; after: string }
+  | { kind: "newly"; after: string }
+  | { kind: "cleared"; before: string };
+
 interface Props {
   song: Song;
   /** Channel labels from the active track map (length 25). */
   channelLabels: string[];
+  /**
+   * Per-channel file-assignment delta vs the editor's last-saved
+   * baseline. Channels with no entry are unchanged. Renders a small
+   * brand-blue dot in the row's icon slot with a tooltip describing
+   * the change. The dot outranks the longest-file stopwatch (dirty
+   * state is transient and actionable; longest is durable info) but
+   * defers to the rate-mismatch warning (hard error). Cleared on
+   * save (baseline reset).
+   */
+  channelChanges: Map<number, ChannelChange>;
   /**
    * Filename of the audio file with the largest duration. The BandMate
    * plays each song until the longest WAV ends, so we surface it.
@@ -173,6 +200,7 @@ function formatDuration(totalSeconds: number): string {
 export function ChannelGrid({
   song,
   channelLabels,
+  channelChanges,
   longestFilename,
   longestDurationSeconds,
   channelSampleRates,
@@ -360,6 +388,7 @@ export function ChannelGrid({
                 onClean={onCleanMidi}
                 isLongest={midiIsLongest}
                 longestDurationLabel={longestDurationLabel}
+                change={channelChanges.get(idx)}
                 isSelected={isSelected}
                 isDragOver={isDragOver}
                 dragMode={dragMode}
@@ -393,6 +422,7 @@ export function ChannelGrid({
               hasRateMismatch={hasRateMismatch}
               channelRate={channelRate ?? null}
               songRate={songRate}
+              change={channelChanges.get(idx)}
               isSelected={isSelected}
               isDragOver={isDragOver}
               dragMode={dragMode}
@@ -426,6 +456,7 @@ function AudioRow({
   hasRateMismatch,
   channelRate,
   songRate,
+  change,
   isSelected,
   isDragOver,
   dragMode,
@@ -447,6 +478,8 @@ function AudioRow({
   hasRateMismatch: boolean;
   channelRate: number | null;
   songRate: number;
+  /** Delta vs the last-saved baseline for this channel, if any. */
+  change: ChannelChange | undefined;
   isSelected: boolean;
   isDragOver: boolean;
   /** When dragging over, which zone the cursor is in. */
@@ -565,7 +598,15 @@ function AudioRow({
         {label}
       </span>
       {/* Icon slot — always present so filename column stays aligned.
-          Rate-mismatch (error) takes precedence over the longest indicator. */}
+          Priority: rate-mismatch (error) > unsaved-change dot > longest.
+          Rationale: the warning is a hard error (file won't play on
+          BandMate). The change dot is a transient "you have unsaved
+          work" cue — it earns higher priority than the longest
+          stopwatch because the user can only act on dirty state until
+          they Save, while the longest indicator is durable info
+          they'll see again on the next visit. Once Save resets the
+          baseline, the dot disappears and the stopwatch reclaims the
+          slot. */}
       <span className="flex items-center justify-center">
         {isAssigned && hasRateMismatch ? (
           <span
@@ -575,6 +616,8 @@ function AudioRow({
           >
             <WarningIcon className="h-3 w-3" />
           </span>
+        ) : change ? (
+          <ChangeDot change={change} channelLabel={`Ch ${index + 1}`} />
         ) : isAssigned && isLongest ? (
           <span
             className="inline-flex h-4 w-4 items-center justify-center rounded bg-zinc-200 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
@@ -921,6 +964,47 @@ function StopwatchIcon({ className }: { className?: string }) {
 }
 
 /**
+ * Tiny brand-blue dot rendered in a row's icon slot when the row's
+ * file assignment differs from the editor's last-saved baseline.
+ *
+ * Tooltip text varies by change kind:
+ *   - newly:    "Newly assigned: <after> (was empty)"
+ *   - cleared:  "Removed: <before> (now empty)"
+ *   - replaced: "Changed: <before> → <after>"
+ *
+ * The dot is intentionally smaller (h-1.5 w-1.5) than the 16px icon
+ * slot — the row's other visual signals (selected accent bar, drag
+ * highlights) are louder; this is meant to be a quiet scan cue you
+ * notice on the second pass, not a primary affordance. The dirty
+ * banner at the footer carries the overall unsaved signal.
+ */
+function ChangeDot({
+  change,
+  channelLabel,
+}: {
+  change: ChannelChange;
+  channelLabel: string;
+}) {
+  const tooltip = (() => {
+    switch (change.kind) {
+      case "newly":
+        return `${channelLabel} — newly assigned: ${change.after} (was empty)`;
+      case "cleared":
+        return `${channelLabel} — removed: ${change.before} (now empty)`;
+      case "replaced":
+        return `${channelLabel} — changed: ${change.before} → ${change.after}`;
+    }
+  })();
+  return (
+    <span
+      className="inline-block h-1.5 w-1.5 rounded-full bg-brand-500 dark:bg-brand-400"
+      title={tooltip}
+      aria-label={tooltip}
+    />
+  );
+}
+
+/**
  * Small pill rendered next to a MIDI filename indicating whether the
  * file contains only keep-list events (clean) or has strip-list meta
  * events that may cause spurious patch changes on a live MIDI port.
@@ -976,6 +1060,7 @@ function MidiRow({
   onClean,
   isLongest,
   longestDurationLabel,
+  change,
   isSelected,
   isDragOver,
   dragMode,
@@ -990,6 +1075,8 @@ function MidiRow({
   cleanState: boolean | null;
   /** Trigger a clean on the assigned MIDI file. */
   onClean: () => Promise<void>;
+  /** Delta vs the last-saved baseline for the MIDI slot, if any. */
+  change: ChannelChange | undefined;
   /**
    * True when the assigned MIDI file is the longest media in the song
    * (its duration set `<length>` on save). Common when the MIDI runs
@@ -1074,12 +1161,13 @@ function MidiRow({
       >
         {label}
       </span>
-      {/* Icon slot — stopwatch when the MIDI is the longest media in
-          the song (its duration set <length>). Same treatment as the
-          AudioRow stopwatch so users can spot which file determines
-          song duration regardless of whether it's WAV or MIDI. */}
+      {/* Icon slot — change dot wins over the longest stopwatch, mirroring
+          AudioRow's precedence. Once Save resets the baseline, the dot
+          clears and the stopwatch reclaims the slot. */}
       <span className="flex items-center justify-center">
-        {isLongest && filename ? (
+        {change ? (
+          <ChangeDot change={change} channelLabel="MIDI slot" />
+        ) : isLongest && filename ? (
           <span
             className="inline-flex h-4 w-4 items-center justify-center rounded bg-zinc-200 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
             title={`Longest file in this song (${longestDurationLabel}) — its length sets the song's overall duration. The BandMate plays through until this file ends.`}
