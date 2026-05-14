@@ -6,6 +6,19 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.4] — 2026-05-14
+
+### Changed
+
+- **Repo cleanup — batch 1 (three lowest-risk phases from `docs/CLEANUP-PLAN.md`).**
+  - **Phase 1 (cruft + .gitignore):** removed the tracked 0-byte `_tmp_3_3c7399f521744105a15156eb3385480a` scaffolding leftover; added a Windows block (`Thumbs.db`, `Desktop.ini`) to `.gitignore` preemptively since Beta criterion 4 in [docs/ROADMAP.md](docs/ROADMAP.md) targets a Windows build; broadened the TS-incremental-build-cache rule from `tsconfig.tsbuildinfo` to `*.tsbuildinfo`. `tsconfig.tsbuildinfo` was already gitignored and never tracked in history.
+  - **Phase 3 (archive MVP-PLAN.md):** moved the original phased v0.1 plan (`MVP-PLAN.md`, written 2026-05-11) to `docs/archive/MVP-PLAN-2026-05-11.md` with a short archival-note header pointing to current planning ([docs/ROADMAP.md](docs/ROADMAP.md) + [BACKLOG.md](BACKLOG.md)). Most of the original plan has shipped or been refactored; release-level goals now live in ROADMAP and active polish items in BACKLOG. Reference updates: README's "phased v0.1 checklist" link repointed at the archive (with a note that current planning is in ROADMAP); dropped the bare `— see MVP-PLAN.md` fragment from a SPEC.md bullet. Git tracks the move as a rename so the file's history follows it. The README's broader staleness (still claims "Pre-MVP scaffold") is Phase 2 of the cleanup plan and intentionally not touched here.
+  - **Phase 7 (audit logos/):** moved the original scaffolding-era app icon set `logos/bandmate-app-icon/` (9 files) to `logos/archive/bandmate-app-icon/` — superseded by the `bandmate-studio-icon/concept-B-wave.svg` flow in PR #13. Added a new `logos/README.md` documenting the directory structure, which files are the current BMS app icon source, which top-level PNGs are byte-identical to `src/assets/` production copies (with a sync note), and what `vectors/` / `highres/` are for. `bandmate-studio-icon/`, `joeco-logo-*-retina-flat*.png`, `vectors/`, and `highres/` all kept in place as active sources / brand library / vector source-of-truth.
+
+### Notes
+
+- Docs/hygiene-only PR — no behavior change, no codec changes, no UI changes. Typecheck and the 42-test vitest suite both pass at each phase. Cleanup phases 2, 4, 5, 6, 8 from `docs/CLEANUP-PLAN.md` are deferred to follow-up PRs.
+
 ## [0.8.3] — 2026-05-14
 
 ### Documentation
