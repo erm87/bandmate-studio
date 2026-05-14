@@ -126,6 +126,13 @@ export function SourceFilesPane({
     return true; // MIDI is always importable (no per-file diagnostic).
   });
 
+  // Manual refresh of the source folder. Bumping this counter forces
+  // FolderView to re-list (same mechanism the Song Folder tab uses
+  // for post-save / post-clean refresh). Cheap operation — the
+  // module-level folderListCache gets refreshed by the fetch path
+  // and the new file count flows back via onFilesLoaded.
+  const [sourceRefreshKey, setSourceRefreshKey] = useState(0);
+
   return (
     <aside className="flex w-96 shrink-0 flex-col overflow-hidden bg-zinc-50 dark:bg-zinc-900/40">
       <TabBar
@@ -172,7 +179,7 @@ export function SourceFilesPane({
       ) : sourceFolder ? (
         <FolderView
           folder={sourceFolder}
-          refreshKey={0}
+          refreshKey={sourceRefreshKey}
           onFilesLoaded={setSourceFolderFiles}
           helper={
             <>
@@ -188,6 +195,7 @@ export function SourceFilesPane({
             <SourceFolderHeaderActions
               onChange={() => void pickFolder(onChangeSourceFolder)}
               onClear={onClearSourceFolder}
+              onRefresh={() => setSourceRefreshKey((k) => k + 1)}
               onImportAll={onImportAll ?? null}
               importAllDisabled={!hasUsableSourceFiles}
             />
@@ -470,11 +478,18 @@ function FolderView({
 function SourceFolderHeaderActions({
   onChange,
   onClear,
+  onRefresh,
   onImportAll,
   importAllDisabled,
 }: {
   onChange: () => void;
   onClear: () => void;
+  /**
+   * Re-list the current source folder. Picks up files added since
+   * the folder was first selected (e.g., a fresh Logic bounce dropped
+   * in mid-session) without round-tripping through Clear / Change.
+   */
+  onRefresh: () => void;
   onImportAll: (() => void) | null;
   /**
    * Disable the Import-all chip when the source folder has no
@@ -489,8 +504,8 @@ function SourceFolderHeaderActions({
         // Tonal because Import-all is the primary workflow action of
         // this pane — pulling files from an external folder into the
         // song is the whole point of the Source Folder tab. Sits to
-        // the left of the neutral Clear / Change… chrome buttons so
-        // it reads as "the action," not "another setting."
+        // the left of the neutral chrome buttons so it reads as
+        // "the action," not "another setting."
         <Button
           variant="tonal"
           size="xs"
@@ -505,6 +520,14 @@ function SourceFolderHeaderActions({
           Import all
         </Button>
       )}
+      <Button
+        variant="tertiary"
+        size="xs"
+        onClick={onRefresh}
+        title="Re-check this folder for newly-added files (e.g., after a fresh Logic bounce)"
+      >
+        Refresh
+      </Button>
       <Button
         variant="tertiary"
         size="xs"
