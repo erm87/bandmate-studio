@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.9.1] — 2026-05-14
+
+### Documentation
+
+- **BACKLOG** — two new entries captured at the top of the file:
+  - *Sidebar — keyboard arrow navigation when no editor sub-selection is active.* ↑/↓ walks the current sidebar section (songs / playlists / track maps) when no channel or playlist-row sub-selection is consuming arrows. Gating mirrors the existing ESC chain; navigation routes through `requestSelect` so the unsaved-changes guard still applies. No wrap at section boundaries.
+  - *Song editor — stopwatch icon on all rows tied for longest duration.* Replaces the current `longestFilename: string | null` single-row marker with a set so every file whose sample count matches the song's max gets the stopwatch. Comparison is in samples (integer), not seconds, to avoid `m:ss`-rounding false ties. Per-row change-dot precedence (from 0.7.1) is unchanged.
+
+### Notes
+
+- Docs-only PR — no behavior change. Patch bump per the project's per-PR bump workflow (no new mechanism, no UI change; just backlog capture).
+
 ## [0.9.0] — 2026-05-14
 
 ### Added
