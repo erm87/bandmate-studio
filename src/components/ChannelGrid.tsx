@@ -29,6 +29,7 @@ import {
   setDragImageLabel,
   setDragPayload,
 } from "../lib/dnd";
+import { formatDuration } from "../lib/duration";
 
 /**
  * A single channel's delta against the editor's last-saved baseline,
@@ -188,14 +189,6 @@ function formatMetaLine(meta: ChannelMeta | undefined): string {
 // appear when the row is selected. It's reserved at all times so
 // rows don't reflow when selection moves.
 const COLS = "grid-cols-[32px_110px_16px_1fr_40px_40px_72px]";
-
-/** Format a duration in seconds as `m:ss` (zero-padded seconds). */
-function formatDuration(totalSeconds: number): string {
-  const seconds = Math.max(0, Math.floor(totalSeconds));
-  const mm = Math.floor(seconds / 60);
-  const ss = (seconds % 60).toString().padStart(2, "0");
-  return `${mm}:${ss}`;
-}
 
 export function ChannelGrid({
   song,

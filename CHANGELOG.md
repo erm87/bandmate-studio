@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.7] — 2026-05-14
+
+### Changed
+
+- **`src/` audit — Phase 6 of [docs/CLEANUP-PLAN.md](docs/CLEANUP-PLAN.md).** Dead-code + duplicate-helper sweep. Baseline was already healthy: `tsc --noUnusedLocals --noUnusedParameters` passes with no output, no unused exports across `lib/` / `codec/` / `state/` / `fs/` / `components/`, file naming is consistent (PascalCase `.tsx` components, camelCase `.ts` utilities). Three concrete changes:
+  - **Deleted `src/components/MainPlaceholder.tsx`.** Its file body explicitly read "intentionally left empty so a future cleanup pass can delete it from disk" — renamed to `WelcomeStub.tsx` back in PR #1; the tombstone has been sitting unused since. Also cleaned up a now-stale "renamed for clarity" comment in `WelcomeStub.tsx` that referenced the deleted file.
+  - **Lifted `formatDuration` into `src/lib/duration.ts`** (this lift was explicitly named in the cleanup plan). Two implementations existed: `PlaylistHeader.tsx` (richer, handles `h:mm:ss` for durations ≥1 hour) and `ChannelGrid.tsx` (simpler `m:ss` only). Promoted the richer version; output is identical to the old `m:ss`-only for any realistic per-channel duration and future-proofs the channel case at zero cost.
+  - **Lifted byte formatting into `src/lib/bytes.ts`.** Four near-identical formatters existed: `ExportToUsbDialog.formatBytes` (B/KB/MB/GB), `CleanupConfirmDialog.formatBytes` (same + null→""), `ImportTrackMapDialog.formatSize` (B/KB/MB only, no GB tier), and an exported `exportFilter.formatExportBytes` (same as the Export dialog's local one). Unified into one `formatBytes(bytes: number | null): string` that handles null → "" and all four tiers. The `formatExportBytes` export is dropped from `lib/exportFilter.ts` (was only imported by `ExportToUsbDialog`, which now uses `lib/bytes` directly).
+
+### Notes
+
+- Net: 67 insertions, 69 deletions across 10 files. Two new `lib/` modules, six components / libs updated to import from them, one tombstone deleted, one stale comment cleaned up. No behavior change — every call site receives the same string output it did before (verified via diff and the 42-test vitest suite, which still passes).
+- Deliberately skipped per the cleanup plan's "don't be too aggressive" framing: `validateName` × 4 (in the `New*Dialog`s and `RenameDialog` — common core is only 5 lines, each function has dialog-specific collision logic that makes them intentionally distinct), and `formatModified` × 2 (`ImportTrackMapDialog` vs `SourceFilesPane` use intentionally different output formats — date-only vs date+time with a `modified ` prefix and different null-return conventions). Neither is a true duplicate.
+
 ## [0.8.6] — 2026-05-14
 
 ### Documentation

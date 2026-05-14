@@ -29,6 +29,7 @@
 import { useEffect, useState } from "react";
 import { Button } from "./Button";
 import type { AudioFileInfo } from "../fs/types";
+import { formatBytes } from "../lib/bytes";
 
 interface Props {
   isOpen: boolean;
@@ -49,15 +50,6 @@ interface Props {
    * and the dialog stays open so the user can retry.
    */
   onConfirm: (filenames: string[]) => Promise<void>;
-}
-
-/** Format a byte count as a short human-readable string. */
-function formatBytes(bytes: number | null): string {
-  if (bytes === null) return "";
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
 export function CleanupConfirmDialog({

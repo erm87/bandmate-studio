@@ -34,9 +34,9 @@ import {
 import {
   buildIncludeFilter,
   computeSkipSummary,
-  formatExportBytes,
   type SkipSummary,
 } from "../lib/exportFilter";
+import { formatBytes } from "../lib/bytes";
 
 interface Props {
   isOpen: boolean;
@@ -435,7 +435,7 @@ function ConfirmStep({
             <p>
               Skipping {skipSummary.fileCount} unused file
               {skipSummary.fileCount === 1 ? "" : "s"} (~
-              {formatExportBytes(skipSummary.byteCount)}) that no song's{" "}
+              {formatBytes(skipSummary.byteCount)}) that no song's{" "}
               <span className="font-mono">.jcs</span> references.
             </p>
           )}
@@ -613,15 +613,3 @@ function ErrorStep({
   );
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/** Format a byte count as a short human-readable string (KB / MB / GB). */
-function formatBytes(bytes: number): string {
-  if (bytes < 1024) return `${bytes} B`;
-  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
-  if (bytes < 1024 * 1024 * 1024)
-    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`;
-}
