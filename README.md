@@ -22,7 +22,7 @@ JoeCo's source isn't available, but a patched build of `pycdc` recovered ~88% of
 
 **Pre-MVP scaffold.** Project structure, file-format spec, and phased work plan are written; UI implementation has not started.
 
-See [MVP-PLAN.md](./MVP-PLAN.md) for the phased v0.1 checklist and [SPEC.md](./SPEC.md) for the file-format reference (the contract between this app and the BandMate hardware).
+See [docs/archive/MVP-PLAN-2026-05-11.md](./docs/archive/MVP-PLAN-2026-05-11.md) for the original phased v0.1 checklist (archival — most items have shipped; current planning lives in [docs/ROADMAP.md](./docs/ROADMAP.md)) and [SPEC.md](./SPEC.md) for the file-format reference (the contract between this app and the BandMate hardware).
 
 ## Tech stack
 
@@ -58,7 +58,6 @@ pnpm tauri dev      # spin up dev server with hot-reload + a live macOS app wind
 bm-loader-rebuild/
 ├── README.md                # ← you are here
 ├── SPEC.md                  # .jcm / .jcs / .jcp file format reference
-├── MVP-PLAN.md              # phased v0.1 work checklist
 ├── docs/
 │   └── DEV-SETUP.md         # install Rust + Node, run locally
 ├── package.json             # frontend deps (React, Vite, Tailwind, Tauri)

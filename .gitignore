@@ -27,6 +27,10 @@ src-tauri/gen/
 .Trashes
 .fseventsd
 
+# Windows (Beta criterion 4 targets Windows builds — keep these out preemptively)
+Thumbs.db
+Desktop.ini
+
 # Logs
 npm-debug.log*
 yarn-debug.log*
@@ -43,5 +47,5 @@ src-tauri/.cargo-lock
 # Reverse-engineered BM Loader reference (research material; not part of the rebuild)
 decompiled/
 
-# TypeScript incremental build cache
-tsconfig.tsbuildinfo
+# TypeScript incremental build cache (any tsbuildinfo file, not just the root one)
+*.tsbuildinfo
