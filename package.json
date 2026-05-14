@@ -1,7 +1,7 @@
 {
   "name": "bandmate-studio",
   "private": true,
-  "version": "0.8.10",
+  "version": "0.9.0",
   "type": "module",
   "description": "Modern replacement for JoeCo's BM Loader companion app for the BandMate hardware.",
   "scripts": {
@@ -13,7 +13,9 @@
     "test": "vitest run",
     "bump:patch": "node scripts/bump-version.mjs patch",
     "bump:minor": "node scripts/bump-version.mjs minor",
-    "bump:major": "node scripts/bump-version.mjs major"
+    "bump:major": "node scripts/bump-version.mjs major",
+    "check:versions": "node scripts/check-version-sync.mjs",
+    "check:changelog": "node scripts/check-changelog-entry.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.1.0",
