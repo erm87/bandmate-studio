@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-05-13
+
+### Added
+
+- Source Folder tab now has a **Refresh** button alongside Import all / Clear / Change…. Re-lists the current source folder so newly-added files (e.g., a fresh Logic bounce dropped into the folder mid-session) show up without round-tripping through Clear → Change → re-pick. Always enabled; the Import-all button's disabled state automatically recomputes after the refresh via the existing `onFilesLoaded` callback.
+
+
 ## [0.3.1] — 2026-05-13
 
 ### Documentation
