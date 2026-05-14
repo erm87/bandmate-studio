@@ -6,6 +6,18 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-05-13
+
+### Added
+
+- **Smart Mapping now proposes replacements for already-assigned channels** instead of silently skipping them. When Import all finds a fuzzy match for a channel that already has a file, the new **Smart Import** dialog lists each proposed replacement (`current → proposed`, plus the channel label) with a checkbox per row. All checkboxes default to checked; **Select all** / **Deselect all** at the top for bulk action. Footer: **Cancel**, **Import without auto-mapping** (copies every candidate into the song folder with no assignment changes — one-time override that doesn't touch the Smart Mapping preference), and **Replace N files** (applies the checked replacements + the empty-channel auto-fills). MIDI replacements participate in the same dialog. Unchecked replacements still copy into the song folder unassigned so the file's available for click-assign.
+- Replacements that fire go through `applyEdit`, so they show in **Undo history**, flip the **dirty Save banner**, and surface in the **per-row change-dot indicator** shipped in 0.7.x. Replacing a channel preserves the prior **level / pan / mute** values so hand-tuned mixer settings survive a swap — only the filename changes.
+
+### Notes
+
+- Dialog only opens when at least one replacement is being proposed. Pure empty-channel imports (the common first-import case) still run friction-free with no dialog interruption — preserves the original Import all behavior for songs that haven't been imported before.
+- The dialog is gated on `userPrefs.smartMappingEnabled`. With Smart Mapping off, every Import all file copies into the song folder unassigned — no fuzzy matching, no dialog. The Settings toggle remains the way to opt out permanently; the "Import without auto-mapping" button is the one-time override.
+
 ## [0.7.1] — 2026-05-13
 
 ### Changed
