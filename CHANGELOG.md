@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.7.1] — 2026-05-13
+
+### Changed
+
+- **Per-row change indicator now outranks the longest-file stopwatch in the icon slot.** Previously the stopwatch on the longest-media row stayed visible even when that row's assignment had been edited since last save — the change dot was suppressed. Flipped the precedence so unsaved changes win: dirty state is transient and actionable (the user can only act on it until they Save), while the longest indicator is durable info that returns once Save clears the dot. The rate-mismatch warning still wins the slot over both (it's the only hard error).
+
+## [0.7.0] — 2026-05-13
+
+### Added
+
+- **Song editor — per-row change indicators.** Channels whose file assignment differs from the last saved state now show a small brand-blue dot in the row's icon slot, with a hover tooltip describing the change (`Ch 3 — changed: drum_v1.wav → drum_v2.wav`, `Ch 5 — newly assigned: …`, `Ch 8 — removed: …`). Both audio rows and the MIDI row participate. Dots clear on Save (baseline resets) and are restored on Undo. Scope is file assignment only — per-channel Lvl / Pan / Mute tweaks are intentionally not surfaced so the indicator stays a clean at-a-glance "what did I touch" cue.
+
+### Notes
+
+- Priority in the row's 16px icon slot is *rate-mismatch warning > longest stopwatch > change dot*. If a row already has a warning or stopwatch, the change dot doesn't render — the dirty banner at the editor footer still carries the overall unsaved signal, and the more operational warning / longest signals stay visible.
+
 ## [0.6.0] — 2026-05-13
 
 ### Fixed

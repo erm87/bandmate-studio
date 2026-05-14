@@ -114,43 +114,6 @@ https://github.com/erm87/bandmate-studio/issues/new
 
 ---
 
-## Song editor — per-row change indicators
-
-**Where:** `SongEditor.tsx` channel-grid rows. Today the only "you have changes" affordance is the blue dot badge on the Save button / song header that lights up when `editor.current` differs from `editor.baseline`. Once the user clicks Save, all change state is reset.
-
-**Idea:** Add a per-row change indicator that helps the user audit *what specifically* has changed since last save — useful both for hand-edits and (especially) after Smart Mapping has auto-assigned things.
-
-**Visual:**
-- A small **blue dot** to the left of the file column on any channel whose file assignment has changed since the last-saved baseline. Mirror the positioning convention already used for the longest-length stopwatch icon on the same row.
-- On hover, a tooltip describes the delta in plain text:
-  - **Replaced:** `"File_A.wav → File_B.wav"`
-  - **Newly assigned:** `"Unassigned → File_A.wav"`
-  - **Cleared:** `"File_A.wav → Unassigned"`
-- The dot disappears on the next successful Save (i.e. the diff is relative to the current saved baseline, not to "ever").
-
-**Why:** Without this, a user who runs Smart Mapping has no easy way to verify *which* channels Smart Mapping touched short of scanning the whole 25-row grid against memory. Especially valuable for the auto-update-existing-channels path (above) where the change is destructive of prior state — even if the user confirmed the dialog, having a permanent in-grid record until Save lets them catch a misclick. Also useful for plain manual edits — Save's all-or-nothing dot doesn't tell you whether you changed one row or twelve.
-
-**Implementation notes:**
-- Source of truth: diff `editor.current.song.channels[i]` against `editor.baseline.song.channels[i]`. The reducer already keeps both, so this is a pure derived value.
-- One badge component, three message variants based on `(baseline filename, current filename)`:
-  - both set, different → "old → new"
-  - baseline empty, current set → "Unassigned → new"
-  - baseline set, current empty → "old → Unassigned"
-  - both empty → no badge
-  - both equal → no badge
-- Tooltip uses the same hover affordance pattern as the longest-length stopwatch.
-- Don't recompute on every render — `useMemo` the diff against baseline so it's stable across keystrokes elsewhere.
-- This pairs with the auto-update dialog (above) but is standalone-valuable; ship them in either order.
-
-**Open questions:**
-- Should the dot also reflect non-file changes on the row (LVL, PAN edits)? Probably yes for consistency — anything that's not in the baseline gets the dot, and the tooltip lists all changes. But scope-creeps the change-detection logic. Start with file changes only; extend later.
-- Color: use brand-blue (matching the Save-dirty dot) so the user reads "this dot is the same kind of dirty signal as the Save dot, just zoomed in." Alternatively use amber/orange to distinguish "this row changed" from "Save needed." Brand-blue is more honest about the relationship.
-- Should this also appear in the Track Map editor and Playlist editor for parity? Both have the same baseline-vs-current undo machinery — would be a natural extension once the Song editor version is settled.
-
-**Captured:** 2026-05-11
-
----
-
 ## Source Folder tab — manual refresh button
 
 **Where:** `SourceFilesPane.tsx` — `SourceFolderHeaderActions` (the Import all / Clear / Change… row).
