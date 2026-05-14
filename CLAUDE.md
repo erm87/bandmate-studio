@@ -40,7 +40,7 @@ pnpm bump:minor    # new feature / new UI surface / behavior change (default dur
 pnpm bump:major    # post-1.0 only — breaking changes
 ```
 
-The script ([scripts/bump-version.mjs](scripts/bump-version.mjs)) writes all four version files in lockstep: `src-tauri/tauri.conf.json` (canonical), `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, `package.json`. Amend the bump into your commit, then update [CHANGELOG.md](CHANGELOG.md) under `## [Unreleased]` describing the change (grouped Added / Changed / Fixed / Notes per Keep a Changelog). After merge to `main`, tag `v0.X.Y` and `git push --tags` so a working folder or bug report can be traced back to a build. Full details in [docs/VERSIONING.md](docs/VERSIONING.md).
+The script ([scripts/bump-version.mjs](scripts/bump-version.mjs)) writes all four version files in lockstep: `src-tauri/tauri.conf.json` (canonical), `src-tauri/Cargo.toml`, `src-tauri/Cargo.lock`, `package.json`. Amend the bump into your commit, then update [CHANGELOG.md](CHANGELOG.md) by adding a new `## [<version>] — YYYY-MM-DD` section **directly below** the `## [Unreleased]` heading (as its next sibling, *not* as content nested under it — `[Unreleased]` stays an empty placeholder; per-version entries get their own `## [X.Y.Z]` section). Group items under `### Added` / `### Changed` / `### Fixed` / `### Documentation` / `### Notes` per Keep a Changelog. After merge to `main`, tag `v0.X.Y` and `git push --tags` so a working folder or bug report can be traced back to a build. Full details in [docs/VERSIONING.md](docs/VERSIONING.md).
 
 ## Common commands
 

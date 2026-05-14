@@ -51,7 +51,29 @@ Version bumps happen **per PR**. Specifically:
    ```bash
    git add -u && git commit --amend --no-edit
    ```
-4. Update `CHANGELOG.md` — add a new section under `## [Unreleased]` describing the change.
+4. Update `CHANGELOG.md` — add a new `## [<version>] — YYYY-MM-DD` section **directly below** the `## [Unreleased]` heading (as its next sibling, not nested under it). `## [Unreleased]` stays as an empty placeholder heading; per-version entries go in their own `## [X.Y.Z]` section. Group items under `### Added` / `### Changed` / `### Fixed` / `### Documentation` / `### Notes` per [Keep a Changelog](https://keepachangelog.com/).
+
+   Concretely, after the bump the top of `CHANGELOG.md` should look like:
+
+   ```markdown
+   ## [Unreleased]
+
+   ## [0.X.Y] — YYYY-MM-DD
+
+   ### <group>
+
+   - <your change>
+   ```
+
+   *Not* this (which is the failure mode that bit PR #34):
+
+   ```markdown
+   ## [Unreleased]
+
+   ### Added            ← entries under [Unreleased] is wrong
+
+   - <your change>
+   ```
 5. After merge to main, tag the release:
    ```bash
    git tag v0.X.Y
