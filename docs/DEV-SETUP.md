@@ -76,13 +76,14 @@ cargo tauri --version
 
 ## First run
 
+From the cloned repo root:
+
 ```bash
-cd "/Users/ericmorgan/Documents/Claude/Projects/Band Live Rig/improvements/bm-loader-rebuild"
 pnpm install      # ~30s; pulls React, Vite, Tailwind, Tauri JS bindings
 pnpm tauri dev    # ~3–5 min the first time; Cargo compiles the Rust backend
 ```
 
-A native macOS window should pop up showing the placeholder UI. Hot-reload is wired up: edit any file under `src/` and the window updates instantly. Edit any file under `src-tauri/src/` and the Rust backend rebuilds (slower — ~10s).
+A native macOS window should pop up showing the BandMate Studio UI. Hot-reload is wired up: edit any file under `src/` and the window updates instantly. Edit any file under `src-tauri/src/` and the Rust backend rebuilds (slower — ~10s).
 
 ## Common dev commands
 
@@ -90,8 +91,9 @@ A native macOS window should pop up showing the placeholder UI. Hot-reload is wi
 pnpm tauri dev              # run dev mode (hot-reload)
 pnpm tauri build            # produce .dmg in src-tauri/target/release/bundle/dmg/
 pnpm dev                    # frontend-only dev (in a regular browser, no Tauri shell)
-pnpm test                   # run the file-format codec tests (Phase 1)
+pnpm test                   # run the codec round-trip tests (vitest)
 pnpm typecheck              # tsc --noEmit
+pnpm bump:patch|minor|major # bump version files in lockstep — see docs/VERSIONING.md
 ```
 
 ## Troubleshooting
@@ -113,7 +115,7 @@ pnpm tauri build
 # output: src-tauri/target/release/bundle/dmg/BandMate Studio_<version>_aarch64.dmg
 ```
 
-The `.dmg` is unsigned (i.e., macOS will warn on first launch). Code-signing + notarization is on the v0.2 list — for now, right-click → Open the first time to bypass Gatekeeper.
+The `.dmg` is unsigned (i.e., macOS will warn on first launch). Code-signing + notarization decisions (Apple Developer cert, Windows code-signing cert) will be made closer to the v1.x release — see [ROADMAP.md § v1.x Distribution](ROADMAP.md#distribution-1). For now, right-click → Open the first time to bypass Gatekeeper.
 
 ## When you're done with this project
 

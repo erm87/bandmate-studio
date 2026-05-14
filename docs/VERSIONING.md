@@ -42,9 +42,10 @@ Version bumps happen **per PR**. Specifically:
    pnpm bump:minor    # new feature, new UI surface, behavior change (default)
    pnpm bump:major    # post-1.0 only: breaking changes
    ```
-2. The script updates all three version files in lockstep:
+2. The script updates all four version files in lockstep:
    - `src-tauri/tauri.conf.json` (canonical — what the Tauri bundler reads)
    - `src-tauri/Cargo.toml` (Rust crate)
+   - `src-tauri/Cargo.lock` (Cargo workspace pin — kept in sync within the same commit to avoid a one-version drift in `git diff`)
    - `package.json` (Node side, informational)
 3. Amend the version bump into your commit:
    ```bash
