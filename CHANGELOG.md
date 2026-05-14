@@ -6,6 +6,21 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.6.0] — 2026-05-13
+
+### Fixed
+
+- **Import all** now copies all imported files (smart-matched + MIDI winner + direct-copy / overflow) into the song folder immediately. Previously matched files were queued in `pendingCopies` and didn't physically land in the song folder until the next Save, while unmatched files copied eagerly — creating an asymmetry where the Song Folder pane showed only a subset of the imports until Save. The toast's claim that files were "imported into the song folder" is now literally true at click-time, no Save round-trip required.
+
+### Changed
+
+- Import all's toast now counts *successful* copies rather than just queued imports. If any per-file copy fails mid-batch, the toast appends `"N failed to copy (see console)"` so the user has a signal to investigate.
+
+### Notes
+
+- The single-file click-to-assign flow is unchanged — clicking a single file in the Source Folder pane still assigns the channel immediately and queues the copy via `pendingCopies` for the next Save. Only the Import all batch op flipped to eager-copy.
+
+
 ## [0.4.0] — 2026-05-13
 
 ### Added

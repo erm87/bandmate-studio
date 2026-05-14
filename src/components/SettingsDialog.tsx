@@ -45,11 +45,18 @@ interface Props {
   onClose: () => void;
 }
 
-type SectionId = "appearance" | "defaults" | "midi" | "export" | "about";
+type SectionId =
+  | "appearance"
+  | "defaults"
+  | "import"
+  | "midi"
+  | "export"
+  | "about";
 
 const SECTIONS: { id: SectionId; label: string }[] = [
   { id: "appearance", label: "Appearance" },
   { id: "defaults", label: "Defaults" },
+  { id: "import", label: "Import" },
   { id: "midi", label: "MIDI" },
   { id: "export", label: "Export" },
   { id: "about", label: "About" },
@@ -127,6 +134,7 @@ export function SettingsDialog({ isOpen, onClose }: Props) {
           <div className="flex-1 overflow-y-auto px-6 py-5">
             {active === "appearance" && <AppearanceSection />}
             {active === "defaults" && <DefaultsSection />}
+            {active === "import" && <ImportSection />}
             {active === "midi" && <MidiSection />}
             {active === "export" && <ExportSection />}
             {active === "about" && <AboutSection />}
@@ -623,6 +631,56 @@ function MidiSection() {
           {status}
         </p>
       )}
+    </section>
+  );
+}
+
+/**
+ * Import — preferences for the Source Folder tab's "Import all"
+ * flow. Currently one toggle (`smartMappingEnabled`); the
+ * auto-update-existing-channel-assignments feature (next backlog
+ * item) will gate on this same flag.
+ *
+ * When the toggle is OFF, Import all becomes a pure copy-only
+ * operation — every source file is copied into the song folder
+ * without any channel assignment. The user click-assigns each
+ * file manually afterward. The right setting for users whose
+ * filenames don't track their channel labels closely enough for
+ * fuzzy matching to be net-positive.
+ */
+function ImportSection() {
+  const { state, setUserPrefs } = useAppState();
+  const enabled = state.userPrefs.smartMappingEnabled;
+  return (
+    <section className="flex flex-col gap-4">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex flex-col gap-1">
+          <p className="text-sm font-medium text-zinc-900 dark:text-zinc-100">
+            Smart Mapping
+          </p>
+          <p className="max-w-md text-xs leading-relaxed text-zinc-500 dark:text-zinc-400">
+            When on, <strong>Import all</strong> on the Source Folder
+            tab matches each file to a track-map channel by name (with
+            light fuzzy matching — handles{" "}
+            <span className="font-mono">CamelCase</span>,{" "}
+            <span className="font-mono">snake_case</span>,{" "}
+            <span className="font-mono">kebab-case</span>, letter↔digit
+            boundaries) and auto-assigns the match. Unmatched files
+            still get copied into the song folder so you can
+            click-assign them manually. When off, every file copies
+            without auto-assignment — turn off if the matcher's
+            guesses cause more friction than they save.
+          </p>
+        </div>
+        <ToggleSwitch
+          isOn={enabled}
+          disabled={false}
+          onToggle={() =>
+            setUserPrefs({ smartMappingEnabled: !enabled })
+          }
+          ariaLabel="Smart Mapping"
+        />
+      </div>
     </section>
   );
 }
