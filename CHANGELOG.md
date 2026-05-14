@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.1] — 2026-05-14
+
+### Documentation
+
+- **Working-folder backwards-compat audit complete.** Ran the full 5-phase protocol in `docs/COMPAT-TEST.md` against a substantive 4-song / 2-playlist / 4-track-map working folder, exercising both BMS and BM Loader as writers in alternating iterations. All phases PASS: BMS reads BM Loader's files without error, writes back without drift, and coexists cleanly across repeated round-trips. The `.jcs` writer is byte-perfect against BM Loader's output; the `.jcm` writer's F-3 CRLF→LF normalization fires as documented when a CRLF-seeded template is first saved by BMS. Closes Beta criterion 1 in [docs/ROADMAP.md](docs/ROADMAP.md).
+
+### Changed
+
+- `BACKLOG.md` pruned: removed the now-satisfied `[Beta blocker]` working-folder backwards-compat audit entry. The "Song editor — edit channel level, pan, mute" entry was also removed after confirming BM Loader doesn't support this either (it's a scope decision, not a parity gap — revisit only if user demand surfaces).
+
+### Notes
+
+- Two BM Loader behaviors documented during the audit but not flagged as regressions: (a) BM Loader's `.jcs` writer is not byte-stable (saving identical content twice produces different bytes — BMS's writer is the more stable reference); (b) BM Loader doesn't clean orphan stems when a channel is reassigned (BMS's "Clean up unreferenced files" affordance addresses this on the BMS side).
+
 ## [0.8.0] — 2026-05-13
 
 ### Added
