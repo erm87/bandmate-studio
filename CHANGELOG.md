@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.10] — 2026-05-14
+
+### Documentation
+
+- **CHANGELOG cleanup + workflow-doc clarification (the workflow violation flagged in [0.8.9]'s Notes).** Two changes:
+  - **`CHANGELOG.md`** — moved the four `### Added` / `### Changed` / `### Notes` entries that PR #34 placed under `## [Unreleased]` into a proper `## [0.8.8] — 2026-05-14` section. Original content preserved verbatim; a Notes bullet inside `[0.8.8]` records the relocation. Also dropped the now-resolved "Version collision" bullet from `[0.8.9]`'s Notes.
+  - **`docs/VERSIONING.md` + `CLAUDE.md`** — clarified step 4 of the per-PR bump workflow. The previous phrasing ("add a new section under `## [Unreleased]`") was ambiguous and bit PR #34: it can be read as either "as its next sibling" (the project convention, used by every entry from 0.7.0 through 0.8.9) or "as content nested under that heading" (PR #34's reading). Replaced with explicit prescriptive wording ("**directly below** the `## [Unreleased]` heading, as its next sibling, *not* as content nested under it — `[Unreleased]` stays an empty placeholder") plus a concrete before/after example in `docs/VERSIONING.md` showing the right and wrong layouts side-by-side.
+
+### Notes
+
+- Docs-only PR — no behavior change, no codec changes, no UI changes. Typecheck and the 42-test vitest suite both pass. Patch-bump because the change is fix-only (CHANGELOG re-layout + doc-wording fix; no new feature).
+- v0.8.9 was tagged on `main` at the merge commit before this fix-up branched, so the tag points at history-as-released; this PR doesn't rewrite the 0.8.9 release.
+
+## [0.8.9] — 2026-05-14
+
+### Documentation
+
+- **New `docs/HYGIENE-PLAN.md` — companion to [docs/CLEANUP-PLAN.md](docs/CLEANUP-PLAN.md).** CLEANUP-PLAN.md is the one-shot phased list to bring the repo to a sharable baseline; HYGIENE-PLAN.md is the ongoing reference for *staying* clean from here on. Organized as a **four-layer mechanism model** — Layer 1 *CI on every PR* (typecheck, vitest, `cargo check`, new `check-version-sync` / `check-changelog-entry` scripts, codec round-trip rule); Layer 2 *cloud-scheduled Routines* (weekly dep-update sweep, weekly backlog freshness, monthly doc-drift, monthly dead-code scan, quarterly codec-fixture-refresh reminder — all output as draft PRs / issues, never auto-merge); Layer 3 *optional pre-commit hooks* via husky (catches the same things as CI but earlier in the loop); Layer 4 *process & habits* with explicit trigger subsections (per-PR diff-review discipline beyond the gates, per phase-flip checklist with concrete-artifact walkthrough + personal gates from CLAUDE.md + compat + smoke reruns, user-visible-feature → README/SMOKE-TEST/CLAUDE.md alignment, BM Loader new-release → re-decompile/compat-rerun/fixture-refresh/pinned-CHANGELOG-note, before-rehearsal working-USB walkthrough, "investigate before gitignoring" rule, quarterly architectural review). Followed by a **phased rollout** H1–H6 ordered cheapest-highest-leverage with acceptance criteria per phase (H1 CI minimum viable → H2 first Routine → H3 backlog+doc Routines → H4 dead-code Routine → H5 optional pre-commit hooks → H6 pre-Beta release-readiness Routine). Closes with a **Routines fit analysis** explaining why CI is the right tool for Layer 1 rather than Routines (rate limits would constrain merge throughput — Pro 5/day, Max 15/day would cap PR gating), a **maintaining-this-plan meta-section** with the four triggers for re-reading the doc, and a **what-this-doesn't-cover** boundary section pointing to BACKLOG/ROADMAP/CLEANUP-PLAN/SPEC/CLAUDE.md.
+
+### Notes
+
+- Docs-only PR — no behavior change, no codec changes, no UI changes. Typecheck and the 42-test vitest suite both pass. Not a cleanup-plan phase — sits alongside CLEANUP-PLAN.md as a separate, ongoing reference. Phases H1–H6 are proposals, not committed-to work; the doc itself ships in this PR but each rollout phase is a separate future PR.
+
+## [0.8.8] — 2026-05-14
+
 ### Added
 
 - **`docs/EXPORT-PARITY-TEST.md`** — manual audit procedure for verifying USB-export byte-parity vs. BM Loader on macOS and Windows. Mirrors [`docs/COMPAT-TEST.md`](docs/COMPAT-TEST.md)'s structure: preconditions, Phases A–E (baseline → BMS export → diff → source-stability check → hardware playback lite), known acceptable diffs, reporting format. Closes the documentation gap for [Beta criterion 2](docs/ROADMAP.md#criteria) and parallels how `COMPAT-TEST.md` closes criterion #1.
@@ -21,17 +46,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 - **macOS half of [Beta criterion 2](docs/ROADMAP.md#criteria) passed (2026-05-14).** Ran the new audit's pretend-USB short form against a representative working folder (14 song folders, 2 playlists, 1 custom track map). BMS export tree is byte-identical to source modulo the documented `.bandmate-studio.json` sidecar strip — 48 source files → 44 dest files, 4 sidecars removed, zero content drift. The full BM-Loader-driven audit was not run this session; the short form treats the working folder as the BM-Loader baseline (correct under [SPEC.md](SPEC.md)'s "working folder is what gets pushed to the USB" model) and is sufficient to validate that BMS isn't introducing drift relative to its source. Windows half is blocked on [criterion #4](docs/ROADMAP.md#criteria) ("Windows build validated").
 - Docs-only PR — no behavior change, no codec changes, no UI changes. Typecheck and the 42-test vitest suite both pass.
-
-## [0.8.9] — 2026-05-14
-
-### Documentation
-
-- **New `docs/HYGIENE-PLAN.md` — companion to [docs/CLEANUP-PLAN.md](docs/CLEANUP-PLAN.md).** CLEANUP-PLAN.md is the one-shot phased list to bring the repo to a sharable baseline; HYGIENE-PLAN.md is the ongoing reference for *staying* clean from here on. Organized as a **four-layer mechanism model** — Layer 1 *CI on every PR* (typecheck, vitest, `cargo check`, new `check-version-sync` / `check-changelog-entry` scripts, codec round-trip rule); Layer 2 *cloud-scheduled Routines* (weekly dep-update sweep, weekly backlog freshness, monthly doc-drift, monthly dead-code scan, quarterly codec-fixture-refresh reminder — all output as draft PRs / issues, never auto-merge); Layer 3 *optional pre-commit hooks* via husky (catches the same things as CI but earlier in the loop); Layer 4 *process & habits* with explicit trigger subsections (per-PR diff-review discipline beyond the gates, per phase-flip checklist with concrete-artifact walkthrough + personal gates from CLAUDE.md + compat + smoke reruns, user-visible-feature → README/SMOKE-TEST/CLAUDE.md alignment, BM Loader new-release → re-decompile/compat-rerun/fixture-refresh/pinned-CHANGELOG-note, before-rehearsal working-USB walkthrough, "investigate before gitignoring" rule, quarterly architectural review). Followed by a **phased rollout** H1–H6 ordered cheapest-highest-leverage with acceptance criteria per phase (H1 CI minimum viable → H2 first Routine → H3 backlog+doc Routines → H4 dead-code Routine → H5 optional pre-commit hooks → H6 pre-Beta release-readiness Routine). Closes with a **Routines fit analysis** explaining why CI is the right tool for Layer 1 rather than Routines (rate limits would constrain merge throughput — Pro 5/day, Max 15/day would cap PR gating), a **maintaining-this-plan meta-section** with the four triggers for re-reading the doc, and a **what-this-doesn't-cover** boundary section pointing to BACKLOG/ROADMAP/CLEANUP-PLAN/SPEC/CLAUDE.md.
-
-### Notes
-
-- Docs-only PR — no behavior change, no codec changes, no UI changes. Typecheck and the 42-test vitest suite both pass. Not a cleanup-plan phase — sits alongside CLEANUP-PLAN.md as a separate, ongoing reference. Phases H1–H6 are proposals, not committed-to work; the doc itself ships in this PR but each rollout phase is a separate future PR.
-- Version collision: PR #34 also targeted 0.8.8 (landed first); this PR re-bumped to 0.8.9. PR #34's CHANGELOG entries currently sit under `[Unreleased]` rather than under `[0.8.8]` — that's a separate workflow-violation fix-up, not in scope here.
+- Entries originally landed under `## [Unreleased]` in PR #34 (a workflow ambiguity in the bump docs at the time — see PR #36 / `[0.8.10]` for the convention clarification). Relocated to this `## [0.8.8]` section to match the project convention; original content preserved verbatim.
 
 ## [0.8.7] — 2026-05-14
 
