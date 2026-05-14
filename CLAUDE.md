@@ -57,6 +57,19 @@ pnpm bump:patch|minor|major   # see docs/VERSIONING.md — must run before each 
 
 Vitest is configured for Node environment (codec is pure-functional and DOM-free). There is no JS lint step. The Rust side has no separate test command — `cargo test` is available but not currently wired into scripts.
 
+## Dev server
+
+Eric runs `pnpm tauri dev` in a separate terminal he manages — do not start, stop, or restart it from Code sessions. Vite HMR picks up `src/**/*` edits automatically; assume your changes are live in the running app within a few seconds of save.
+
+Restart is needed (Eric's call, not yours) when changing:
+- `tauri.conf.json` — window config, plugins, version display
+- `Cargo.toml` — Rust dependencies
+- `vite.config.ts` — Vite plugin/build config
+
+`src-tauri/src/*.rs` changes trigger a cargo rebuild automatically via Tauri's watcher; no manual restart.
+
+If a change might require a restart, surface that in your response so Eric can do it on his side. Don't try to verify changes by launching a dev process — `pnpm typecheck` and `pnpm test` cover the automated verification; Eric reviews the running app visually as part of PR review.
+
 ## Architecture
 
 **Two-process app: JS frontend in the webview, Rust backend behind Tauri commands.** The boundary is deliberate:
