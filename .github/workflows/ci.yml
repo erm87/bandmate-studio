@@ -50,6 +50,13 @@ jobs:
       - name: CHANGELOG entry for current version
         run: pnpm check:changelog
 
+      - name: Build frontend
+        # Required before cargo check: tauri::generate_context!() reads
+        # tauri.conf.json's `frontendDist: "../dist"` at compile time and
+        # fails if the directory doesn't exist. Running the real build
+        # also gates against frontend build regressions.
+        run: pnpm build
+
       - name: Set up Rust toolchain
         uses: dtolnay/rust-toolchain@stable
 
