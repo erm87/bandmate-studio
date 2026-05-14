@@ -1,5 +1,7 @@
 # Codec Parity Audit — BandMate Studio vs BM Loader
 
+> **Status (2026-05-14):** Historical — preserved as the design-rationale reference for the codec. This one-shot audit (2026-04-28) compared BMS's codec against the decompiled BM Loader source. **Finding #1** (`<trackmap>` optionality) was a real divergence and was fixed; **#2–#8** are informational with no action required for the codec as used by the BMS UI. Ongoing BM Loader parity verification is now done via the manual round-trip protocol in [COMPAT-TEST.md](COMPAT-TEST.md), which was last run end-to-end on 2026-05-14 and closed [Beta criterion 1](ROADMAP.md#criteria). Don't re-run this static audit unless you change `src/codec/*.ts` writer behavior in a way COMPAT-TEST.md wouldn't catch — and even then, prefer extending COMPAT-TEST.md.
+
 **Date:** 2026-04-28
 **Scope:** Compare our TypeScript codec writers/readers in `src/codec/`
 against the decompiled BM Loader code in `decompiled/per_function/playlistparse/`

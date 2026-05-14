@@ -65,6 +65,29 @@ The new gear-icon entry point and the three sections.
 - [ ] Toggle to **off** does not prompt; future imports are not cleaned
 - [ ] Choice persists across app relaunch
 
+### 1e. Smart Mapping
+- [ ] "Smart Mapping" toggle is visible in Settings with a short
+      description of what it does
+- [ ] Toggle defaults to **on** for a fresh install
+- [ ] Toggle to **off**, then in the Song editor click **Import all**
+      from a Source Folder — every candidate file copies into the song
+      folder unassigned (no fuzzy match, no Smart Import dialog)
+- [ ] Toggle back to **on**, **Import all** from a Source Folder that
+      has at least one filename that fuzzy-matches an already-assigned
+      channel — the Smart Import dialog appears
+- [ ] Choice persists across app relaunch
+
+### 1f. USB export filter
+- [ ] "Skip unreferenced files on export" toggle is visible in Settings
+      with a short description
+- [ ] When **on**, the Export to USB dialog shows a "Skipping N unused
+      file(s) (~M MB)" summary before the user clicks Export
+- [ ] If any song's `.jcs` references zero media files, the dialog
+      surfaces a warning so the user can investigate before exporting
+- [ ] Toggle **off** — the dialog shows no skip summary and every file
+      under each song folder is included in the export
+- [ ] Choice persists across app relaunch
+
 ---
 
 ## 2. Song editor
@@ -88,6 +111,23 @@ Open an existing song (Ctrl/Cmd-clicking a song row in the sidebar).
 - [ ] Delete / Backspace clears the selected channel
 - [ ] Long file names truncate cleanly without overflowing the row
 
+### 2b-1. Per-row change indicators
+- [ ] On a clean (just-loaded) song, no rows show a change dot
+- [ ] Assign a file to an empty channel → that row shows a small
+      brand-blue dot in the icon slot; hover tooltip says
+      `Ch N — newly assigned: <filename>`
+- [ ] Replace the file on an already-assigned channel → dot appears;
+      tooltip says `Ch N — changed: <old> → <new>`
+- [ ] Clear an assigned channel → dot appears; tooltip says
+      `Ch N — removed: <filename>`
+- [ ] The MIDI row (slot 25) participates in the same way
+- [ ] Save → dots clear (baseline resets)
+- [ ] Undo a change → the dot is restored
+- [ ] On a row that ALSO has a rate-mismatch warning or the
+      longest-file stopwatch, the higher-priority indicator wins the
+      icon slot (rate-mismatch > stopwatch > change dot); the dirty
+      banner at the editor footer still signals unsaved overall
+
 ### 2c. Source files pane
 - [ ] Tab bar shows Song Folder + Source Folder
 - [ ] Song Folder tab lists files already in the song folder
@@ -96,6 +136,33 @@ Open an existing song (Ctrl/Cmd-clicking a song row in the sidebar).
 - [ ] After picking a source folder, .wav and .mid files appear with
       correct severity tags (clean / warning / error / midi)
 - [ ] Hover tooltips show full file specs
+- [ ] **Refresh** button re-lists the source folder without
+      re-picking it
+
+### 2c-1. Smart Import dialog
+Pre-req: Settings → Smart Mapping is **on** (default).
+
+- [ ] In the Source Folder tab, click **Import all** when at least
+      one candidate filename fuzzy-matches an already-assigned
+      channel → the **Smart Import** dialog appears
+- [ ] Each proposed replacement row shows `current → proposed` plus
+      the channel label, with a checkbox defaulting to checked
+- [ ] **Select all** / **Deselect all** at the top toggle every row
+- [ ] **Cancel** dismisses the dialog without changing anything
+- [ ] **Replace N files** applies only the checked rows; unchecked
+      replacements still copy into the song folder unassigned (so
+      they're available for click-assign)
+- [ ] **Import without auto-mapping** copies every candidate into
+      the song folder with no assignment changes; this is a
+      one-time override that does NOT flip the Smart Mapping pref
+- [ ] Replacements that fire show in the per-row change dot
+      (§2b-1), flip the dirty Save banner, and appear in the Undo
+      History panel (§2e)
+- [ ] Replacing a channel preserves the prior level / pan / mute
+      values — only the filename changes
+- [ ] The dialog does NOT appear when Import all finds only
+      empty-channel matches (pure first-time imports stay
+      friction-free)
 
 ### 2d. Save flow
 - [ ] Edit something → dirty dot appears next to the title
@@ -227,7 +294,29 @@ files" toggled **on**:
 - [ ] `dot_clean -m` runs after the copy (no `._<file>` AppleDouble
       siblings on the stick — verify by switching the stick to the
       BandMate or by `ls -la` in Terminal)
+- [ ] `.bandmate-studio.json` sidecars and `.DS_Store` files are
+      filtered out (don't land on the USB stick — verify by `ls -la`)
 - [ ] Eject succeeds; stick disappears from Finder
+
+### 7c. Skip-unreferenced filter
+Pre-req: Settings → "Skip unreferenced files on export" (§1f) is **on**.
+
+Set up a song folder that has at least one WAV (or `.mid`) on disk
+that is NOT assigned to any channel in that song's `.jcs` (a stem
+from a prior import, etc.).
+
+- [ ] Open the Export to USB dialog → header shows a
+      "Skipping N unused file(s) (~M MB)" summary that lists the
+      unreferenced files
+- [ ] If any song's `.jcs` would result in zero shipped media files,
+      the dialog surfaces a warning callout so the user can
+      investigate before continuing
+- [ ] Confirm export → only files referenced by each song's `.jcs`
+      land in the destination song folders (verify by comparing
+      source vs destination `ls -la`)
+- [ ] Toggle the pref **off** in Settings, re-open Export to USB
+      dialog → no skip summary; on confirm, every file from the
+      source song folders lands on the destination
 
 ---
 
