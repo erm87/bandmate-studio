@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+### Added
+
+- **`docs/EXPORT-PARITY-TEST.md`** — manual audit procedure for verifying USB-export byte-parity vs. BM Loader on macOS and Windows. Mirrors [`docs/COMPAT-TEST.md`](docs/COMPAT-TEST.md)'s structure: preconditions, Phases A–E (baseline → BMS export → diff → source-stability check → hardware playback lite), known acceptable diffs, reporting format. Closes the documentation gap for [Beta criterion 2](docs/ROADMAP.md#criteria) and parallels how `COMPAT-TEST.md` closes criterion #1.
+
+### Changed
+
+- **`docs/ROADMAP.md`** — criterion #2 line now links to the new audit doc and records the macOS PASS (2026-05-14) and Windows-pending status inline.
+- **`CLAUDE.md`** — reliability principle's "USB export pipeline" sentence now points at both `COMPAT-TEST.md` (working-folder parity) and the new `EXPORT-PARITY-TEST.md` (USB-export parity).
+- **`README.md`** — docs index entry for `COMPAT-TEST.md` re-labeled with its Beta-criterion-1 scope; new entry added for `EXPORT-PARITY-TEST.md` with its Beta-criterion-2 scope.
+- **`.gitignore`** — added `audit-runs/` so parity-test scratch outputs (timestamped snapshot folders generated during EXPORT-PARITY-TEST runs) never accidentally get committed.
+
+### Notes
+
+- **macOS half of [Beta criterion 2](docs/ROADMAP.md#criteria) passed (2026-05-14).** Ran the new audit's pretend-USB short form against a representative working folder (14 song folders, 2 playlists, 1 custom track map). BMS export tree is byte-identical to source modulo the documented `.bandmate-studio.json` sidecar strip — 48 source files → 44 dest files, 4 sidecars removed, zero content drift. The full BM-Loader-driven audit was not run this session; the short form treats the working folder as the BM-Loader baseline (correct under [SPEC.md](SPEC.md)'s "working folder is what gets pushed to the USB" model) and is sufficient to validate that BMS isn't introducing drift relative to its source. Windows half is blocked on [criterion #4](docs/ROADMAP.md#criteria) ("Windows build validated").
+- Docs-only PR — no behavior change, no codec changes, no UI changes. Typecheck and the 42-test vitest suite both pass.
+
 ## [0.8.7] — 2026-05-14
 
 ### Changed

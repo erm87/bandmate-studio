@@ -64,7 +64,8 @@ Discipline note: BandMate Studio is a clean-room reimplementation. Code is never
 - [SPEC.md](./SPEC.md) — on-disk format reference (`.jcm`, `.jcs`, `.jcp`, USB layout). The contract between BMS and the BandMate hardware.
 - [docs/ROADMAP.md](./docs/ROADMAP.md) — Alpha / Beta / Stable goals and criteria.
 - [docs/VERSIONING.md](./docs/VERSIONING.md) — per-PR version-bump workflow and phase semantics.
-- [docs/COMPAT-TEST.md](./docs/COMPAT-TEST.md) — manual audit protocol for verifying BM Loader interoperability.
+- [docs/COMPAT-TEST.md](./docs/COMPAT-TEST.md) — manual audit protocol for verifying BM Loader working-folder interoperability (Beta criterion 1).
+- [docs/EXPORT-PARITY-TEST.md](./docs/EXPORT-PARITY-TEST.md) — manual audit protocol for verifying USB-export byte-parity vs. BM Loader on macOS and Windows (Beta criterion 2).
 - [docs/SMOKE-TEST.md](./docs/SMOKE-TEST.md) — pre-release smoke test plan.
 - [docs/DEV-SETUP.md](./docs/DEV-SETUP.md) — first-time toolchain setup on macOS.
 - [BACKLOG.md](./BACKLOG.md) — active polish / feature items not yet scheduled.

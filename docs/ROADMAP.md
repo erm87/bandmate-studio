@@ -21,7 +21,7 @@ The Beta version number is whichever `0.X.0` is current when the criteria are me
    - BMS writes → BM Loader reads.
    - Alternating editing across both apps over multiple sessions, no artifact buildup.
    - Byte-level parity on the `.jcs` / `.jcp` / `.jcm` formats for the deterministic parts.
-2. **USB Export output matches BM Loader** on both macOS and Windows (byte-level parity for the deterministic portions of the output tree).
+2. **USB Export output matches BM Loader** on both macOS and Windows (byte-level parity for the deterministic portions of the output tree). Verified via the [USB-export parity audit](EXPORT-PARITY-TEST.md). **macOS: PASS (2026-05-14)** via the pretend-USB short form (BMS export → local destination, compared against the source working folder); Windows half pending criterion #4.
 3. **BandMate hardware playback validated** — a Studio-exported USB stick plays cleanly on the BandMate hardware in a real rehearsal context.
 4. **Windows build validated** end-to-end: working folder pick → song / playlist / track-map editing → USB export → BandMate playback.
 5. **Users can submit feedback from within the Studio app** that lands as GitHub Issues. Implementation: a pre-filled GitHub Issues URL opened via Tauri's shell plugin, auto-populated with app version + OS context. The user authenticates with their own GitHub account in the browser to submit. No service-side secrets required.

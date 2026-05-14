@@ -12,7 +12,7 @@ BandMate Studio (BMS) — a Tauri (Rust) + React + TypeScript + Tailwind desktop
 
 **This app drives a live performance rig.** Eric's band uses the BandMate hardware on stage; a broken export or corrupted `.jcs` means a broken show. Bias toward:
 
-- **Stable, deterministic writers** for the three file formats and the USB export pipeline. If a change risks byte drift against BM Loader's output, validate via [docs/COMPAT-TEST.md](docs/COMPAT-TEST.md) before merging.
+- **Stable, deterministic writers** for the three file formats and the USB export pipeline. If a change risks byte drift against BM Loader's output, validate via [docs/COMPAT-TEST.md](docs/COMPAT-TEST.md) (working-folder parity) and/or [docs/EXPORT-PARITY-TEST.md](docs/EXPORT-PARITY-TEST.md) (USB-export parity) before merging.
 - **Lenient reads, strict writes.** Tolerate anything BM Loader has ever emitted; emit only the canonical form.
 - **Idempotent file operations.** Re-running a save / scan / export against an unchanged working folder should be a no-op. Avoid timestamp-driven changes that creep into diffs.
 - **No silent destruction.** Renames, duplicates, deletes, and "clean up unreferenced files" actions go through confirm dialogs and surface what they'll touch beforehand.
