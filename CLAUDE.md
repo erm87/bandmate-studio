@@ -85,3 +85,15 @@ Vitest is configured for Node environment (codec is pure-functional and DOM-free
 - **MIDI files imported into song folders** are run through `midly` to strip non-essential meta events (Kemper-bound MIDI tracks must contain only events the device responds to). See `clean_midi_file` / `is_midi_clean` commands and [src-tauri/src/midi.rs](src-tauri/src/midi.rs).
 - **Tauri bundle identifier matters for the macOS app icon** — set in [src-tauri/tauri.conf.json](src-tauri/tauri.conf.json). Don't let it revert to the Tauri default placeholder.
 - **The `_tmp_*` file** at the repo root is harmless leftover scaffolding; don't commit anything to it.
+
+## Design conventions
+
+Recurring decisions that aren't enforced by tooling and aren't obvious from reading any single file. New work should respect them unless there's a strong reason to revisit and Eric agrees.
+
+- **Prefer "allow with a visible warning" over "prevent the bad state entirely."** BM Loader hard-blocks two operations BMS deliberately allows: changing a song's sample rate after files are assigned (BMS surfaces a rate-mismatch warning on affected rows), and — once we build it — editing LVL/PAN/mute on assigned channels. The pattern is: trust the user to recognize the warning and act on it. The only exception is operations that could irrecoverably corrupt user data, of which there are currently none.
+
+- **`docs/ROADMAP.md` is the *public* criteria list; personal gates aren't in it.** Before flipping `APP_PHASE` from alpha → beta or beta → stable, Eric runs two additional gates not captured in ROADMAP: multi-rehearsal validation in the live rig, and a Q&A pass with Joe at JoeCo on the BM Loader compatibility surface. These are intentionally not public criteria (they aren't externally verifiable). Do not propose flipping the phase based solely on the public criteria passing — surface that the personal gates are also needed.
+
+- **Channel assignment is click-to-assign, not drag-drop.** The current UX is *select a channel row, then click a source file* (the inverse direction is not supported). Drag-drop is a deferred Phase 3g feature, intentionally not built yet. The Smart Import confirmation dialog, on-row action buttons, and Source Folder click handlers are all designed around this model. New features touching channel assignment should follow the click model; if drag-drop is ever added, it goes in as a coordinated change across all the surfaces, not piecemeal.
+
+- **The source folder is the user's working area; BMS treats it as read-only.** BMS only writes to the *song folder* (under `bm_media/bm_sources/<song>/`), never to the user's source folder (typically a Logic / Pro Tools export directory). Smart Mapping reads source files but never moves, renames, or deletes them. The user's Logic export workflow continues to own that folder. Orphan-stem cleanup in *song folders* is opt-in via the explicit "Clean up unreferenced files" affordance — never automatic.

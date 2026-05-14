@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.8.3] — 2026-05-14
+
+### Documentation
+
+- `CLAUDE.md`: added a **Design conventions** section capturing four recurring decisions that aren't enforced by tooling and aren't obvious from any single file: the "allow with a visible warning" stance vs BM Loader's hard-blocks (sample-rate change after assignment; LVL/PAN editing once we build it), the distinction between public ROADMAP criteria and personal release gates (rehearsal validation + Joe Q&A), the click-to-assign (not drag-drop) channel-assignment model that the Smart Import dialog and on-row actions are built on, and the read-only treatment of the user's source folder (BMS writes only to the song folder; orphan cleanup is opt-in via the explicit affordance). Surfaces context that previously lived only in conversation memory.
+
 ## [0.8.2] — 2026-05-14
 
 ### Documentation
