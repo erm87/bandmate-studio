@@ -101,6 +101,25 @@ export interface UserPrefs {
    * once they understand their song folders accumulate cruft.
    */
   exportOnlyReferencedFiles: boolean;
+  /**
+   * When true (default), the "Import all" button on the Source
+   * Folder tab tries to match each file to a track-map channel
+   * by name (fuzzy match via `src/lib/sourceMatch.ts`) and assigns
+   * the match automatically; unmatched files copy into the song
+   * folder without channel assignment. When false, Import all
+   * skips the fuzzy matcher entirely — every file is copied into
+   * the song folder, no channel assignments are made.
+   *
+   * The auto-update-existing-channels feature gates on this same
+   * flag (see BACKLOG.md). When off, no auto-replacement dialogs
+   * appear either.
+   *
+   * Default `true` preserves the current behavior for existing
+   * users. Off is the right setting for users whose filenames
+   * don't line up with their track-map labels and the fuzzy
+   * matcher's guesses are net-negative.
+   */
+  smartMappingEnabled: boolean;
 }
 
 export const DEFAULT_USER_PREFS: UserPrefs = {
@@ -114,6 +133,10 @@ export const DEFAULT_USER_PREFS: UserPrefs = {
   defaultExportDestPath: "",
   // Off by default — full-copy stays the safe baseline.
   exportOnlyReferencedFiles: false,
+  // On by default — preserves the fuzzy-match behavior that
+  // shipped with Import all. Users can opt out if it's net-negative
+  // for their filenames.
+  smartMappingEnabled: true,
 };
 
 /**
@@ -151,6 +174,10 @@ export function loadUserPrefs(): UserPrefs {
         typeof parsed.exportOnlyReferencedFiles === "boolean"
           ? parsed.exportOnlyReferencedFiles
           : DEFAULT_USER_PREFS.exportOnlyReferencedFiles,
+      smartMappingEnabled:
+        typeof parsed.smartMappingEnabled === "boolean"
+          ? parsed.smartMappingEnabled
+          : DEFAULT_USER_PREFS.smartMappingEnabled,
     };
   } catch {
     return { ...DEFAULT_USER_PREFS };
