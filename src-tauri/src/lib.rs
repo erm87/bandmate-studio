@@ -29,6 +29,7 @@ use std::collections::{HashMap, HashSet};
 use std::fs::{self, File};
 use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, Ordering};
 use tauri::Emitter;
 
 mod midi;
@@ -601,12 +602,15 @@ fn copy_into_folder(src: String, dest_dir: String) -> Result<String, String> {
     Ok(dest_path.to_string_lossy().to_string())
 }
 
-/// Check whether a file already exists. Used by the song editor to
-/// decide whether a newly-assigned file needs copying into the song
-/// folder (vs. one that's already there).
+/// Check whether a path exists on disk — file OR directory. Used by
+/// the export dialog to validate a remembered USB mount path before
+/// pre-selecting it (the destination is a directory, so the old
+/// `is_file()` check always returned false for `/Volumes/<name>`,
+/// which broke pre-selection — root cause of the 0.10.4 testing
+/// report).
 #[tauri::command]
-fn file_exists(path: String) -> bool {
-    Path::new(&path).is_file()
+fn path_exists(path: String) -> bool {
+    Path::new(&path).exists()
 }
 
 // ---------------------------------------------------------------------------
@@ -1556,15 +1560,188 @@ pub struct ExportProgress {
     pub total_bytes: u64,
 }
 
-/// Summary returned when `export_to_usb` completes successfully.
+/// Summary returned when `export_to_usb` completes (successfully or
+/// canceled — failures still surface as `Err(String)`). The JS side
+/// disambiguates "completed" vs "canceled" via `was_canceled` and
+/// uses the totals to drive the Success terminal state's footer copy
+/// ("Copied 4.2 GB in 3 minutes 18 seconds").
+///
+/// The `*_added` / `*_updated` counts answer the question "what
+/// landed on the stick that wasn't there before, vs what was
+/// overwritten with newer content from the working folder." Added =
+/// destination path did not exist before this export started.
+/// Updated = destination existed and we wrote over it. Songs are
+/// tracked at the folder level (any file write inside the song
+/// folder counts the song once); playlists / trackmaps at the
+/// individual-file level. Files we never wrote (filtered out, or
+/// in a partial cancel run we didn't reach) don't appear in either.
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ExportSummary {
     pub files_copied: u64,
     pub bytes_copied: u64,
+    pub total_files: u64,
+    pub total_bytes: u64,
     /// True if `dot_clean -m` ran (macOS only).
     pub dot_cleaned: bool,
+    /// True if the export was halted by a `cancel_export` call. The
+    /// summary fields reflect what landed on the USB before the
+    /// cancel was honored — partial state. JS surfaces a "Canceled"
+    /// terminal state with copy that warns the stick may be
+    /// inconsistent (PR1 cancellation policy (a) — no rollback).
+    pub was_canceled: bool,
+    /// Wall-clock duration of the export in milliseconds, from start
+    /// of the copy through dot_clean. Used by the Success / Canceled
+    /// terminal states' summary footer.
+    pub elapsed_ms: u64,
+    pub songs_added: u64,
+    pub songs_updated: u64,
+    pub playlists_added: u64,
+    pub playlists_updated: u64,
+    pub trackmaps_added: u64,
+    pub trackmaps_updated: u64,
+    /// True if this export ran with the incremental flag on, i.e.
+    /// skipped files whose size+mtime matched the destination. The
+    /// JS side conditionally shows a "N files unchanged" line on
+    /// the Success screen based on this — full exports never have
+    /// "unchanged" semantics (everything was rewritten by design).
+    pub was_incremental: bool,
+    /// Count of files that were skipped because their size + mtime
+    /// matched the existing destination file. Always 0 unless
+    /// `was_incremental` is true.
+    pub files_unchanged: u64,
+    /// True if `dest_path` resolves to a removable volume that
+    /// `eject_volume` could plausibly act on. False for the internal
+    /// system disk or any non-removable destination — the JS side
+    /// disables the Eject button when this is false (with a tooltip
+    /// explaining why) so the user doesn't get a confusing error
+    /// from `diskutil eject` against a non-ejectable path.
+    pub is_ejectable: bool,
 }
+
+/// Accumulator threaded through `copy_tree_with_progress`. The
+/// added-vs-updated distinction is captured at the right moment in
+/// the recursion: songs at folder entry (before we mkdir the
+/// destination), playlists/trackmaps at file copy (before fs::copy
+/// runs). Songs use HashSet so a song folder with multiple files
+/// in the same export only contributes once to the tally.
+#[derive(Default)]
+struct ExportTallies {
+    songs_added: HashSet<String>,
+    songs_updated: HashSet<String>,
+    playlists_added: u64,
+    playlists_updated: u64,
+    trackmaps_added: u64,
+    trackmaps_updated: u64,
+    /// Bumped each time the incremental skip kicks in (dest exists,
+    /// size matches, mtime matches within the FS-resolution
+    /// tolerance). 0 when incremental mode is off.
+    files_unchanged: u64,
+}
+
+/// Classifies a destination path inside `bm_media/` into the role
+/// that drives the added/updated tally. Anything outside
+/// `bm_media/` (shouldn't happen — we only copy under bm_media) or
+/// a file that doesn't match one of the three known patterns
+/// returns `Other` and is ignored by the tally.
+enum FileRole {
+    /// Anything under `bm_media/bm_sources/<song>/...` — counted at
+    /// the song-folder level, not per-file.
+    SongMedia,
+    /// `bm_media/bm_trackmaps/<name>.jcm` — track map definitions.
+    TrackMap,
+    /// `bm_media/<name>.jcp` at the bm_media root — playlists.
+    Playlist,
+    Other,
+}
+
+fn classify_file(dst_path: &Path, bm_media_dst: &Path) -> FileRole {
+    let rel = match dst_path.strip_prefix(bm_media_dst) {
+        Ok(p) => p,
+        Err(_) => return FileRole::Other,
+    };
+    let mut components = rel.components();
+    let first = match components.next() {
+        Some(c) => c,
+        None => return FileRole::Other,
+    };
+    let has_more = components.next().is_some();
+    let first_str = first.as_os_str().to_str().unwrap_or("");
+    let ext_lower = dst_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_ascii_lowercase());
+    if first_str == "bm_sources" {
+        return FileRole::SongMedia;
+    }
+    if first_str == "bm_trackmaps"
+        && has_more
+        && ext_lower.as_deref() == Some("jcm")
+    {
+        return FileRole::TrackMap;
+    }
+    if !has_more && ext_lower.as_deref() == Some("jcp") {
+        return FileRole::Playlist;
+    }
+    FileRole::Other
+}
+
+/// Extract a song folder name when `src` is exactly
+/// `<bm_sources_src>/<song-name>`. Returns None for any other shape
+/// (parent of bm_sources itself, deeper than one level, outside
+/// bm_sources, etc.). Used to tally song folder added/updated at
+/// recursion entry.
+fn song_folder_name(src: &Path, bm_sources_src: &Path) -> Option<String> {
+    let rel = src.strip_prefix(bm_sources_src).ok()?;
+    let mut components = rel.components();
+    let first = components.next()?;
+    if components.next().is_some() {
+        return None;
+    }
+    first.as_os_str().to_str().map(String::from)
+}
+
+/// Pre-flight result returned by `prepare_export`. The JS side renders
+/// inline errors on the confirm step when `is_writable` is false or
+/// `total_bytes > available_bytes` (with a small safety margin).
+///
+/// Both full and incremental totals are returned from a single
+/// destination-aware walk so the UI can show both numbers (and the
+/// "Export updates only" checkbox can toggle which one is active
+/// without a re-fetch). For a fresh USB, `incremental_*` equals
+/// `total_*` (everything counts as new). For a re-export to the
+/// same stick after small edits, `incremental_*` is typically a
+/// small fraction.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExportPreFlight {
+    pub total_files: u64,
+    pub total_bytes: u64,
+    /// Files that would actually be copied under incremental mode
+    /// (destination doesn't exist, or size/mtime differs).
+    pub incremental_files: u64,
+    pub incremental_bytes: u64,
+    /// Free space on the destination volume, in bytes. 0 if the
+    /// volume's available space couldn't be determined (treated as
+    /// non-fatal — the actual write would still error if too large).
+    pub available_bytes: u64,
+    /// True if a probe-file write+delete succeeded at `dest_path`.
+    pub is_writable: bool,
+}
+
+/// Cooperative cancellation flag for `export_to_usb`. Set to `true`
+/// by the `cancel_export` command; the copy loop checks between file
+/// iterations and breaks out gracefully (mid-`fs::copy()` cancellation
+/// would truncate the file currently being written, which is the
+/// failure mode we're trying to PREVENT — the whole point of an
+/// honest cancel button is letting the user back out without putting
+/// the stick in a worse state).
+///
+/// Reset to `false` at the start of every `export_to_usb` call so a
+/// previous canceled session doesn't poison the next one. Single
+/// global because only one export runs at a time (the dialog is modal
+/// and the JS side doesn't allow concurrent invocations).
+static CANCEL_EXPORT: AtomicBool = AtomicBool::new(false);
 
 /// If `src` is a song folder directly under `bm_sources_src` (i.e.
 /// `bm_sources_src/<some_song_name>`), look up the allow-set for that
@@ -1611,40 +1788,68 @@ fn passes_song_filter(name: &str, allowed: &HashSet<String>) -> bool {
     allowed.contains(&name.to_lowercase())
 }
 
+/// Aggregate result from `count_tree`. Two totals are computed in
+/// the same walk so the pre-flight can show both numbers without a
+/// second pass:
+///   - `total_*`: files that survive the filter — what a FULL
+///     export would write.
+///   - `incremental_*`: subset of the above where the destination
+///     file doesn't exist or its size/mtime differ — what an
+///     INCREMENTAL export would actually copy.
+#[derive(Default)]
+struct CountResult {
+    total_files: u64,
+    total_bytes: u64,
+    incremental_files: u64,
+    incremental_bytes: u64,
+}
+
 /// Recursively count files + bytes under `src` so we can compute
 /// progress percentages without re-walking. Applies the same
 /// `bm_sources` song-folder allow-list as the copy pass so the
-/// progress bar's "total" matches what actually gets copied.
+/// progress bar's "total" matches what actually gets copied. Walks
+/// the corresponding `dst` in lockstep to compute the incremental
+/// subset — files where the destination is missing or its
+/// size/mtime indicate the source content has changed.
 fn count_tree(
     src: &Path,
+    dst: &Path,
     bm_sources_src: &Path,
     filter: Option<&HashMap<String, HashSet<String>>>,
-) -> std::io::Result<(u64, u64)> {
-    let mut files = 0u64;
-    let mut bytes = 0u64;
+) -> std::io::Result<CountResult> {
+    let mut result = CountResult::default();
     if src.is_file() {
-        files += 1;
-        bytes += src.metadata()?.len();
-        return Ok((files, bytes));
+        let src_meta = src.metadata()?;
+        let size = src_meta.len();
+        result.total_files = 1;
+        result.total_bytes = size;
+        if !file_matches(&src_meta, dst) {
+            result.incremental_files = 1;
+            result.incremental_bytes = size;
+        }
+        return Ok(result);
     }
     if !src.is_dir() {
-        return Ok((0, 0));
+        return Ok(result);
     }
     let active_song_filter = song_folder_filter(src, bm_sources_src, filter);
     for entry in fs::read_dir(src)? {
         let entry = entry?;
         let kind = entry.file_type()?;
+        let name = entry.file_name();
+        let name_str = name.to_string_lossy();
+        let entry_dst = dst.join(&name);
         if kind.is_dir() {
-            let (f, b) = count_tree(&entry.path(), bm_sources_src, filter)?;
-            files += f;
-            bytes += b;
+            let sub = count_tree(&entry.path(), &entry_dst, bm_sources_src, filter)?;
+            result.total_files += sub.total_files;
+            result.total_bytes += sub.total_bytes;
+            result.incremental_files += sub.incremental_files;
+            result.incremental_bytes += sub.incremental_bytes;
         } else if kind.is_file() {
             // Skip files that won't make it to USB. See
             // `is_export_excluded` for the rule list. Counting them
             // would inflate the "total" against the post-filter
             // reality.
-            let name = entry.file_name();
-            let name_str = name.to_string_lossy();
             if is_export_excluded(&name_str) {
                 continue;
             }
@@ -1653,11 +1858,79 @@ fn count_tree(
                     continue;
                 }
             }
-            files += 1;
-            bytes += entry.metadata()?.len();
+            let src_meta = entry.metadata()?;
+            let size = src_meta.len();
+            result.total_files += 1;
+            result.total_bytes += size;
+            if !file_matches(&src_meta, &entry_dst) {
+                result.incremental_files += 1;
+                result.incremental_bytes += size;
+            }
         }
     }
-    Ok((files, bytes))
+    Ok(result)
+}
+
+/// Returns true if the destination file looks identical to `src` —
+/// same size, mtime equal within filesystem-resolution tolerance.
+/// Used by incremental export to decide whether to skip a file.
+///
+/// **Tolerance:** 2 seconds. FAT32 stores mtimes at 2s resolution,
+/// exFAT at 10ms, APFS sub-millisecond. After `fs::copy` we sync
+/// dst mtime to src mtime via `File::set_modified` (so a fresh
+/// copy reads back identical), but the dst FS may round down — a
+/// 1.8s-resolution drift between src (APFS) and dst (FAT32-on-USB)
+/// would otherwise cause every file to look "changed" on the next
+/// export. 2s is the conservative ceiling.
+///
+/// **Reliability:** any content change rewrites bytes, which
+/// updates mtime — so false negatives (treating a changed file as
+/// unchanged) require modifying a file without touching its mtime,
+/// which isn't possible through normal user workflows. False
+/// positives (treating an unchanged file as changed) just cause an
+/// unnecessary re-copy, which wastes time but never loses data.
+fn file_matches(src_meta: &fs::Metadata, dst: &Path) -> bool {
+    let dst_meta = match fs::metadata(dst) {
+        Ok(m) => m,
+        Err(_) => return false,
+    };
+    if dst_meta.len() != src_meta.len() {
+        return false;
+    }
+    let src_mtime = match src_meta.modified() {
+        Ok(t) => t,
+        Err(_) => return false,
+    };
+    let dst_mtime = match dst_meta.modified() {
+        Ok(t) => t,
+        Err(_) => return false,
+    };
+    mtimes_match(src_mtime, dst_mtime)
+}
+
+/// Absolute-difference mtime comparison with a 2-second tolerance.
+/// See `file_matches` for the rationale.
+fn mtimes_match(a: std::time::SystemTime, b: std::time::SystemTime) -> bool {
+    let diff = match a.duration_since(b) {
+        Ok(d) => d,
+        Err(e) => e.duration(),
+    };
+    diff < std::time::Duration::from_secs(2)
+}
+
+/// Sync the destination file's mtime to the source's. Best-effort —
+/// if it fails (rare; would need restrictive ACLs or an FS that
+/// rejects `set_modified`), the file is still copied correctly,
+/// just won't compare equal under a future incremental export and
+/// would be re-copied unnecessarily.
+fn sync_mtime(dst: &Path, src_meta: &fs::Metadata) {
+    let Ok(src_mtime) = src_meta.modified() else {
+        return;
+    };
+    let _ = fs::File::options()
+        .write(true)
+        .open(dst)
+        .and_then(|f| f.set_modified(src_mtime));
 }
 
 /// True if a file should be filtered out of USB export. Three categories:
@@ -1681,20 +1954,43 @@ fn is_export_excluded(name: &str) -> bool {
 /// metadata, AppleDouble siblings, Studio-only sidecars) — `dot_clean`
 /// cleans up `._*` afterward too, but filtering during copy avoids
 /// the AppleDouble files ever existing on the destination.
+///
+/// Cancellation: checks `CANCEL_EXPORT` between file iterations.
+/// When the flag is set, returns `Ok(true)` to signal that the copy
+/// halted gracefully — the caller treats this as a "canceled" terminal
+/// state rather than an error. Returns `Ok(false)` on normal
+/// completion. We never check mid-file (`fs::copy` is not interruptible
+/// safely; a partial copy would leave a truncated file on the USB).
 fn copy_tree_with_progress(
     src: &Path,
     dst: &Path,
+    bm_media_dst: &Path,
     bm_sources_src: &Path,
     filter: Option<&HashMap<String, HashSet<String>>>,
+    incremental: bool,
     app: &tauri::AppHandle,
+    tallies: &mut ExportTallies,
     files_copied: &mut u64,
     bytes_copied: &mut u64,
     total_files: u64,
     total_bytes: u64,
-) -> Result<(), String> {
+) -> Result<bool, String> {
+    // Capture the song-folder identity and pre-existence at recursion
+    // entry — BEFORE create_dir_all might bring it into being — but
+    // DON'T record it in the tally yet. Under incremental mode it's
+    // common to enter a song folder, find every file unchanged, and
+    // skip the whole folder; tagging at entry would inflate the
+    // "songs updated" count with songs we didn't actually touch.
+    // The tally happens inside the file-copy branch below, on the
+    // first file we actually write into this folder.
+    let song_at_this_level: Option<(String, bool)> =
+        song_folder_name(src, bm_sources_src).map(|name| (name, dst.exists()));
     fs::create_dir_all(dst).map_err(|e| format!("Cannot create {:?}: {}", dst, e))?;
     let active_song_filter = song_folder_filter(src, bm_sources_src, filter);
     for entry in fs::read_dir(src).map_err(|e| format!("Cannot read {:?}: {}", src, e))? {
+        if CANCEL_EXPORT.load(Ordering::SeqCst) {
+            return Ok(true);
+        }
         let entry = entry.map_err(|e| e.to_string())?;
         let kind = entry.file_type().map_err(|e| e.to_string())?;
         let name = entry.file_name();
@@ -1713,21 +2009,83 @@ fn copy_tree_with_progress(
         let from = entry.path();
         let to = dst.join(&name);
         if kind.is_dir() {
-            copy_tree_with_progress(
+            let canceled = copy_tree_with_progress(
                 &from,
                 &to,
+                bm_media_dst,
                 bm_sources_src,
                 filter,
+                incremental,
                 app,
+                tallies,
                 files_copied,
                 bytes_copied,
                 total_files,
                 total_bytes,
             )?;
+            if canceled {
+                return Ok(true);
+            }
         } else if kind.is_file() {
-            let size = entry.metadata().map_err(|e| e.to_string())?.len();
+            let src_meta = entry.metadata().map_err(|e| e.to_string())?;
+            let size = src_meta.len();
+
+            // Incremental skip: if the destination file looks
+            // identical (size + mtime within tolerance), don't
+            // re-copy. Counts toward `files_unchanged` so the
+            // Success screen can surface "N files unchanged" and
+            // the user knows the skip worked. Skipped files don't
+            // contribute to `files_copied`/`bytes_copied` because
+            // the progress bar's total reflects only what will be
+            // copied in incremental mode.
+            if incremental && file_matches(&src_meta, &to) {
+                tallies.files_unchanged += 1;
+                continue;
+            }
+
+            // Classify + check destination existence BEFORE the copy
+            // — once fs::copy runs the file always exists, which
+            // would always tag it as "updated". Songs are tallied
+            // below from `song_at_this_level`, not from classify_file.
+            let was_existing = to.exists();
+            let role = classify_file(&to, bm_media_dst);
             fs::copy(&from, &to)
                 .map_err(|e| format!("Cannot copy {:?} → {:?}: {}", from, to, e))?;
+            // Sync dst mtime to src mtime so future incremental
+            // exports recognize this file as unchanged. fs::copy
+            // doesn't preserve mtime by default — without this, the
+            // next incremental run would re-copy every file every
+            // time. Best-effort; see `sync_mtime`.
+            sync_mtime(&to, &src_meta);
+
+            // Promote the song-folder identity to the firm tally on
+            // the first actual file write in this folder. Subsequent
+            // files in the same folder are no-ops (HashSet dedupe).
+            if let Some((song_name, existed_before)) = &song_at_this_level {
+                if *existed_before {
+                    tallies.songs_updated.insert(song_name.clone());
+                } else {
+                    tallies.songs_added.insert(song_name.clone());
+                }
+            }
+
+            match role {
+                FileRole::Playlist => {
+                    if was_existing {
+                        tallies.playlists_updated += 1;
+                    } else {
+                        tallies.playlists_added += 1;
+                    }
+                }
+                FileRole::TrackMap => {
+                    if was_existing {
+                        tallies.trackmaps_updated += 1;
+                    } else {
+                        tallies.trackmaps_added += 1;
+                    }
+                }
+                FileRole::SongMedia | FileRole::Other => {}
+            }
             *files_copied += 1;
             *bytes_copied += size;
             // Best-effort emit — don't fail the whole copy if the
@@ -1744,7 +2102,7 @@ fn copy_tree_with_progress(
             );
         }
     }
-    Ok(())
+    Ok(false)
 }
 
 /// Run `dot_clean -m <path>` on macOS to strip `._*` AppleDouble files
@@ -1804,11 +2162,33 @@ pub struct ExportIncludeFilter {
 /// maps (under `bm_trackmaps/`) ship regardless because they're
 /// definitions, not media.
 #[tauri::command]
-fn export_to_usb(
+async fn export_to_usb(
     app: tauri::AppHandle,
     working_folder: String,
     dest_path: String,
     include_filter: Option<ExportIncludeFilter>,
+    incremental: bool,
+) -> Result<ExportSummary, String> {
+    // Run the body on a blocking-thread pool task. Tauri's async
+    // runtime workers shouldn't sit on multi-GB `fs::copy()` calls —
+    // it ties up whichever worker the runtime picked and (in the
+    // observed-on-macOS failure mode reported during 0.10.0 testing)
+    // can manifest as a beachballing UI even though the webview's
+    // main thread itself isn't blocked. spawn_blocking is the
+    // documented Tauri pattern for long-running synchronous I/O.
+    tauri::async_runtime::spawn_blocking(move || {
+        export_to_usb_impl(app, working_folder, dest_path, include_filter, incremental)
+    })
+    .await
+    .map_err(|e| format!("Export task did not complete: {}", e))?
+}
+
+fn export_to_usb_impl(
+    app: tauri::AppHandle,
+    working_folder: String,
+    dest_path: String,
+    include_filter: Option<ExportIncludeFilter>,
+    incremental: bool,
 ) -> Result<ExportSummary, String> {
     let src = PathBuf::from(&working_folder).join("bm_media");
     let dst = PathBuf::from(&dest_path).join("bm_media");
@@ -1821,6 +2201,12 @@ fn export_to_usb(
     if !Path::new(&dest_path).is_dir() {
         return Err(format!("Destination is not a directory: {}", dest_path));
     }
+
+    // Fresh run — clear any cancel signal left over from a previous
+    // export. SeqCst ordering keeps this readable against the per-file
+    // loads inside the copy loop.
+    CANCEL_EXPORT.store(false, Ordering::SeqCst);
+    let started_at = std::time::Instant::now();
 
     // Lower-case the allow-list filenames once up front so the
     // hot path (per-file check inside count/copy) is a single
@@ -1843,12 +2229,19 @@ fn export_to_usb(
     let filter_ref = lowered_filter.as_ref();
     let bm_sources_src = src.join("bm_sources");
 
-    // Count first so we have totals for progress calculation. With
-    // the filter active, totals reflect the filtered set so progress
-    // hits 100% at the end rather than stopping short.
-    let (total_files, total_bytes) =
-        count_tree(&src, &bm_sources_src, filter_ref)
-            .map_err(|e| format!("Cannot scan working folder: {}", e))?;
+    // Count first so we have totals for progress calculation. The
+    // walk produces BOTH the full and incremental totals; we pick
+    // which one drives the progress bar based on the `incremental`
+    // flag. Either way the bar reaches 100% — for a full export
+    // because we copy every counted file, for an incremental export
+    // because we counted only what will be copied.
+    let counts = count_tree(&src, &dst, &bm_sources_src, filter_ref)
+        .map_err(|e| format!("Cannot scan working folder: {}", e))?;
+    let (total_files, total_bytes) = if incremental {
+        (counts.incremental_files, counts.incremental_bytes)
+    } else {
+        (counts.total_files, counts.total_bytes)
+    };
 
     // Initial progress event so the dialog shows totals before any
     // file has been copied.
@@ -1865,25 +2258,212 @@ fn export_to_usb(
 
     let mut files_copied = 0u64;
     let mut bytes_copied = 0u64;
-    copy_tree_with_progress(
+    let mut tallies = ExportTallies::default();
+    let was_canceled = copy_tree_with_progress(
         &src,
+        &dst,
         &dst,
         &bm_sources_src,
         filter_ref,
+        incremental,
         &app,
+        &mut tallies,
         &mut files_copied,
         &mut bytes_copied,
         total_files,
         total_bytes,
     )?;
 
-    let dot_cleaned = run_dot_clean(Path::new(&dest_path))?;
+    // Run dot_clean on any path that left files on the stick — that's
+    // both the success case AND a cancellation after some files
+    // already landed. Partial-with-AppleDouble would be the worst of
+    // both worlds (BandMate sees the metadata cruft AND the user
+    // has to re-run). On a cancel before any files copied, skip it.
+    let dot_cleaned = if files_copied > 0 {
+        run_dot_clean(Path::new(&dest_path))?
+    } else {
+        false
+    };
 
+    let elapsed_ms = started_at.elapsed().as_millis() as u64;
+    let is_ejectable = is_path_ejectable(Path::new(&dest_path));
     Ok(ExportSummary {
         files_copied,
         bytes_copied,
+        total_files,
+        total_bytes,
         dot_cleaned,
+        was_canceled,
+        elapsed_ms,
+        songs_added: tallies.songs_added.len() as u64,
+        songs_updated: tallies.songs_updated.len() as u64,
+        playlists_added: tallies.playlists_added,
+        playlists_updated: tallies.playlists_updated,
+        trackmaps_added: tallies.trackmaps_added,
+        trackmaps_updated: tallies.trackmaps_updated,
+        was_incremental: incremental,
+        files_unchanged: tallies.files_unchanged,
+        is_ejectable,
     })
+}
+
+/// Pre-flight check before the user commits to an export. Validates
+/// (1) that the destination is writable by writing+deleting a tiny
+/// probe file under it, (2) how much free space the destination
+/// volume has, and (3) how many files / bytes the export would write
+/// (factoring in the optional include filter so the totals match the
+/// post-filter reality, same as `export_to_usb`).
+///
+/// Returns the raw numbers; the JS side decides what to surface
+/// (e.g. "USB is full — N MB needed, M MB available") and keeps the
+/// user on the confirm step.
+#[tauri::command]
+async fn prepare_export(
+    working_folder: String,
+    dest_path: String,
+    include_filter: Option<ExportIncludeFilter>,
+) -> Result<ExportPreFlight, String> {
+    // Off the runtime worker for the same reason as `export_to_usb`
+    // — count_tree is fast on a single song's bm_media/ but scales
+    // with the working folder size, and the probe write touches a
+    // potentially slow USB. spawn_blocking keeps the IPC bridge
+    // responsive while this runs.
+    tauri::async_runtime::spawn_blocking(move || {
+        prepare_export_impl(working_folder, dest_path, include_filter)
+    })
+    .await
+    .map_err(|e| format!("Pre-flight task did not complete: {}", e))?
+}
+
+fn prepare_export_impl(
+    working_folder: String,
+    dest_path: String,
+    include_filter: Option<ExportIncludeFilter>,
+) -> Result<ExportPreFlight, String> {
+    let src = PathBuf::from(&working_folder).join("bm_media");
+    let dst_root = PathBuf::from(&dest_path);
+    if !src.is_dir() {
+        return Err(format!(
+            "Working folder has no bm_media/ subfolder: {}",
+            working_folder
+        ));
+    }
+    if !dst_root.is_dir() {
+        return Err(format!("Destination is not a directory: {}", dest_path));
+    }
+
+    let lowered_filter: Option<HashMap<String, HashSet<String>>> =
+        include_filter.map(|f| {
+            f.songs
+                .into_iter()
+                .map(|(song, names)| {
+                    (
+                        song,
+                        names
+                            .into_iter()
+                            .map(|n| n.to_lowercase())
+                            .collect::<HashSet<String>>(),
+                    )
+                })
+                .collect()
+        });
+    let bm_sources_src = src.join("bm_sources");
+    let dst = dst_root.join("bm_media");
+    let counts = count_tree(&src, &dst, &bm_sources_src, lowered_filter.as_ref())
+        .map_err(|e| format!("Cannot scan working folder: {}", e))?;
+
+    // Probe: write+delete a tiny file. We deliberately use a
+    // distinctive name and the dest_path root (not the bm_media/
+    // subtree, which may not exist yet on a fresh stick) — the
+    // probe should test writability of the volume itself.
+    let probe_path = dst_root.join(".bms_writable_probe");
+    let is_writable = match fs::write(&probe_path, b"bms") {
+        Ok(_) => {
+            // Don't surface a delete failure — the file is harmless
+            // (3 bytes, dotfile, will be stripped by dot_clean on
+            // export anyway). Writability is what we cared about.
+            let _ = fs::remove_file(&probe_path);
+            true
+        }
+        Err(_) => false,
+    };
+
+    // sysinfo: enumerate disks and find the one whose mount point
+    // is the closest prefix of `dest_path`. On macOS this is the
+    // /Volumes/<name> mount; sysinfo returns each mount as a Disk.
+    let available_bytes = available_space_for(&dst_root);
+
+    Ok(ExportPreFlight {
+        total_files: counts.total_files,
+        total_bytes: counts.total_bytes,
+        incremental_files: counts.incremental_files,
+        incremental_bytes: counts.incremental_bytes,
+        available_bytes,
+        is_writable,
+    })
+}
+
+/// Signal a running `export_to_usb` to halt at the next file boundary.
+/// Cooperative — never interrupts a `fs::copy()` mid-stream because
+/// the OS could leave a truncated file on the destination. The actual
+/// halt happens between files, usually within a few hundred ms on a
+/// USB stick.
+#[tauri::command]
+fn cancel_export() {
+    CANCEL_EXPORT.store(true, Ordering::SeqCst);
+}
+
+/// Free space on the volume containing `path`. Walks the sysinfo
+/// disk list and picks the disk whose mount_point is the longest
+/// prefix of `path` (handles macOS where every external volume
+/// mounts under /Volumes/<name>). Returns 0 if no disk matches —
+/// treated as "unknown; let the actual write surface the failure"
+/// rather than blocking the export.
+fn available_space_for(path: &Path) -> u64 {
+    let disks = sysinfo::Disks::new_with_refreshed_list();
+    let mut best: Option<(usize, u64)> = None;
+    for disk in disks.list() {
+        let mount = disk.mount_point();
+        if path.starts_with(mount) {
+            let len = mount.as_os_str().len();
+            let available = disk.available_space();
+            match best {
+                Some((cur_len, _)) if cur_len >= len => {}
+                _ => best = Some((len, available)),
+            }
+        }
+    }
+    best.map(|(_, b)| b).unwrap_or(0)
+}
+
+/// Whether `eject_volume` could plausibly act on the volume
+/// containing `path`. Resolves the matching sysinfo disk (longest
+/// mount-point prefix, same approach as `available_space_for`) and
+/// returns its `is_removable()`. The boot disk is not removable and
+/// will return false — calling `diskutil eject` against it would
+/// error anyway. USB sticks and SD cards report as removable on
+/// macOS, which is the common case BMS cares about.
+///
+/// Edge case worth noting: external Thunderbolt SSDs that are
+/// technically ejectable via `diskutil` but report as
+/// non-removable will return false here. Acceptable tradeoff vs
+/// surfacing a confusing error on the system disk. Revisit if it
+/// becomes a workflow blocker.
+fn is_path_ejectable(path: &Path) -> bool {
+    let disks = sysinfo::Disks::new_with_refreshed_list();
+    let mut best: Option<(usize, bool)> = None;
+    for disk in disks.list() {
+        let mount = disk.mount_point();
+        if path.starts_with(mount) {
+            let len = mount.as_os_str().len();
+            let removable = disk.is_removable();
+            match best {
+                Some((cur_len, _)) if cur_len >= len => {}
+                _ => best = Some((len, removable)),
+            }
+        }
+    }
+    best.map(|(_, r)| r).unwrap_or(false)
 }
 
 /// Eject the volume mounted at `path` (macOS only).
@@ -1892,8 +2472,20 @@ fn export_to_usb(
 /// — Linux uses `umount`, Windows uses different APIs, both of which
 /// usually need elevated privileges. The frontend treats false as
 /// "platform doesn't auto-eject; tell the user to eject manually."
+///
+/// Wrapped in `spawn_blocking` because `diskutil eject` can take
+/// several seconds (macOS flushes pending writes to the volume) and
+/// running it on the Tauri runtime worker would tie that worker up
+/// — same fix as `export_to_usb`. The frontend renders an
+/// indeterminate "Ejecting…" state while this awaits.
 #[tauri::command]
-fn eject_volume(path: String) -> Result<bool, String> {
+async fn eject_volume(path: String) -> Result<bool, String> {
+    tauri::async_runtime::spawn_blocking(move || eject_volume_impl(path))
+        .await
+        .map_err(|e| format!("Eject task did not complete: {}", e))?
+}
+
+fn eject_volume_impl(path: String) -> Result<bool, String> {
     #[cfg(target_os = "macos")]
     {
         let status = std::process::Command::new("diskutil")
@@ -1955,7 +2547,7 @@ pub fn run() {
             write_text_file,
             list_audio_files,
             copy_into_folder,
-            file_exists,
+            path_exists,
             create_song,
             read_song_sidecar,
             write_song_sidecar,
@@ -1963,6 +2555,8 @@ pub fn run() {
             create_track_map,
             reveal_in_file_manager,
             export_to_usb,
+            prepare_export,
+            cancel_export,
             eject_volume,
             delete_song,
             delete_playlist,

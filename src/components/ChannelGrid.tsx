@@ -63,10 +63,17 @@ interface Props {
    */
   channelChanges: Map<number, ChannelChange>;
   /**
-   * Filename of the audio file with the largest duration. The BandMate
-   * plays each song until the longest WAV ends, so we surface it.
+   * Set of filenames whose duration equals the song's max (the BandMate
+   * plays each song until the longest media file ends). Multiple
+   * filenames means several files are tied at the maximum sample count
+   * — every tied row gets the stopwatch indicator. Empty set if the
+   * folder probe hasn't completed or no files are assigned.
+   *
+   * Comparison is in samples (integer) on the producing side so two
+   * files that round to the same `m:ss` but differ by a handful of
+   * samples don't get spuriously grouped together.
    */
-  longestFilename: string | null;
+  longestFilenames: Set<string>;
   /** Duration in seconds of the longest file (= the song's duration). */
   longestDurationSeconds: number;
   /**
@@ -194,7 +201,7 @@ export function ChannelGrid({
   song,
   channelLabels,
   channelChanges,
-  longestFilename,
+  longestFilenames,
   longestDurationSeconds,
   channelSampleRates,
   channelMeta,
@@ -371,7 +378,7 @@ export function ChannelGrid({
           };
           if (isMidiSlot) {
             const midiIsLongest =
-              midi !== undefined && midi.filename === longestFilename;
+              midi !== undefined && longestFilenames.has(midi.filename);
             return (
               <MidiRow
                 key="midi"
@@ -409,7 +416,7 @@ export function ChannelGrid({
               pan={file?.pan ?? null}
               muted={file ? file.mute === 0 : false}
               isLongest={
-                file !== undefined && file.filename === longestFilename
+                file !== undefined && longestFilenames.has(file.filename)
               }
               longestDurationLabel={longestDurationLabel}
               hasRateMismatch={hasRateMismatch}

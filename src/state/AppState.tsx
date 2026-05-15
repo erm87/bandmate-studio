@@ -87,6 +87,16 @@ export interface AppState {
    * launches — that's `userPrefs.defaultExportDestPath`'s job.
    */
   lastExportDestPath: string | null;
+  /**
+   * Session memory: whether the "Export updates only" checkbox in
+   * the export dialog is checked. Sticky across dialog opens within
+   * a session (the user's intent typically carries — they're
+   * iterating on the same stick) but resets on app launch (defaults
+   * to off so a fresh session starts with the safer full-copy
+   * behavior). Resets on working-folder change for the same reason
+   * as `lastExportDestPath`.
+   */
+  exportIncrementalOnly: boolean;
 }
 
 const EMPTY_SCAN: ScanResult = { songs: [], playlists: [], trackMaps: [] };
@@ -101,6 +111,7 @@ const INITIAL_STATE: AppState = {
   channelSelection: null,
   playlistRowSelection: null,
   lastExportDestPath: null,
+  exportIncrementalOnly: false,
 };
 
 // ---------------------------------------------------------------------------
@@ -114,6 +125,7 @@ export type AppAction =
   | { type: "clear_working_folder" }
   | { type: "set_user_prefs"; prefs: UserPrefs }
   | { type: "set_last_export_dest_path"; path: string | null }
+  | { type: "set_export_incremental_only"; value: boolean }
   | { type: "select"; selection: Selection }
   | { type: "clear_selection" }
   | { type: "select_channel"; channel: number | null }
@@ -182,6 +194,8 @@ function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, userPrefs: action.prefs };
     case "set_last_export_dest_path":
       return { ...state, lastExportDestPath: action.path };
+    case "set_export_incremental_only":
+      return { ...state, exportIncrementalOnly: action.value };
     case "select":
       // Reset both editor sub-selections when sidebar selection
       // changes — the new editor opens fresh, no carryover highlight.

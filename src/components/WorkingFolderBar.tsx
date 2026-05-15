@@ -22,6 +22,7 @@ import { Button } from "./Button";
 import { ContextMenu, type OpenContextMenu } from "./ContextMenu";
 import { ExportToUsbDialog } from "./ExportToUsbDialog";
 import { SettingsDialog } from "./SettingsDialog";
+import { Toast } from "./Toast";
 import joecoLogoNeon from "../assets/joeco-logo-neon.png";
 import joecoLogoWhite from "../assets/joeco-logo-white.png";
 
@@ -31,6 +32,10 @@ export function WorkingFolderBar() {
   const [contextMenu, setContextMenu] = useState<OpenContextMenu | null>(null);
   const [exportOpen, setExportOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  // Toast owned here (not inside the export dialog) so it survives
+  // the dialog's unmount on successful eject. The export dialog
+  // signals via `onEjected` right before calling `onClose`.
+  const [toastMessage, setToastMessage] = useState<string | null>(null);
   if (!path) return null;
   const isLoading = state.status === "loading";
 
@@ -123,11 +128,18 @@ export function WorkingFolderBar() {
       <ExportToUsbDialog
         isOpen={exportOpen}
         onClose={() => setExportOpen(false)}
+        onEjected={() => setToastMessage("USB device ejected.")}
       />
       <SettingsDialog
         isOpen={settingsOpen}
         onClose={() => setSettingsOpen(false)}
       />
+      {toastMessage && (
+        <Toast
+          message={toastMessage}
+          onDismiss={() => setToastMessage(null)}
+        />
+      )}
     </header>
   );
 }
