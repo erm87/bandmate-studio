@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.9.2] — 2026-05-15
+
+### Documentation
+
+- **BACKLOG** — captured *USB Export — progress indicator with ETA, cancel, success/error/canceled states*: a full state-machine design (pre-flight → in-progress → success/error/canceled), Rust↔JS progress event channel, cooperative cancellation policy options, and a phased shipping plan, motivated by the current export dialog giving zero feedback during a multi-GB write.
+
 ## [0.9.1] — 2026-05-14
 
 ### Documentation
