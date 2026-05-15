@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.10.6] — 2026-05-15
+
+### Added
+
+- **Windows release workflow.** New GitHub Actions workflow at [.github/workflows/release.yml](.github/workflows/release.yml) that builds Windows installers (MSI via WiX + NSIS `.exe`) on `windows-latest`. Manual-only trigger during alpha (`workflow_dispatch` — fired from the Actions UI or `gh workflow run release.yml`) so Windows spot-checks happen on demand rather than every tagged release; a `v*` tag trigger gets added as v1 approaches. Installer artifacts upload via `actions/upload-artifact@v4` with 30-day retention. First step toward Beta criterion 4 (Windows build validated); a follow-up PR will extend to a macOS + Windows matrix once the Windows side is proven on a real run. Installers are unsigned for now — Windows SmartScreen will warn on launch; code-signing is a v1 concern. ([docs/ROADMAP.md](docs/ROADMAP.md))
+
+### Notes
+
+- Purely additive — `.github/workflows/ci.yml` is unchanged. Continuing the `0.10.x` themed bundle (USB export iteration → infrastructure follow-on). No user-visible app behavior change; bump is patch per the per-PR convention.
+
 ## [0.10.5] — 2026-05-15
 
 ### Fixed

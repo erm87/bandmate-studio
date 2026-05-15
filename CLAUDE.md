@@ -47,7 +47,8 @@ The script ([scripts/bump-version.mjs](scripts/bump-version.mjs)) writes all fou
 ```bash
 pnpm install            # one-time, pulls JS deps; Rust deps build on first `tauri dev`
 pnpm tauri dev          # native window with HMR; first run is slow (~5 min for cargo)
-pnpm tauri build        # produces .dmg in src-tauri/target/release/bundle/dmg/
+pnpm tauri build        # produces .dmg in src-tauri/target/release/bundle/dmg/ — macOS only on the maintainer's Mac
+                        # (Windows installers are built via the release workflow, [.github/workflows/release.yml](.github/workflows/release.yml), not locally)
 pnpm dev                # frontend-only (regular browser, no Tauri shell — limited utility)
 pnpm test               # vitest, runs the codec round-trip tests against src/codec/__fixtures__/
 pnpm test -- jcm        # filter to one file (vitest pattern match)

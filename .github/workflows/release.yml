@@ -1,0 +1,67 @@
+name: release
+
+# Builds Windows installers (MSI + NSIS .exe) for BandMate Studio.
+# Manual-only trigger during alpha — fired from the Actions UI or
+# `gh workflow run release.yml` for occasional Windows spot-checks.
+# Produces unsigned installers as build artifacts; Windows SmartScreen
+# will warn on launch — expected until we add code-signing (a v1 concern).
+#
+# When approaching v1.x.x stable, add a `push: tags: ['v*']` trigger so
+# tagged releases auto-build. Kept off for now since we don't want
+# routine `git push --tags` after every `0.X.Y` merge to consume runner
+# minutes building artifacts no one will download.
+#
+# macOS builds are not in this workflow yet; the maintainer builds the
+# .dmg locally on their Mac. A follow-up PR will extend to a
+# matrix.os: [windows-latest, macos-latest] once this is proven on a
+# real run.
+
+on:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+
+      - name: Install JS dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Set up Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache cargo registry + target
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: Tauri build (Windows installers)
+        # Produces MSI under src-tauri/target/release/bundle/msi/
+        # and NSIS .exe under src-tauri/target/release/bundle/nsis/.
+        # WiX (MSI) and NSIS are preinstalled on windows-latest.
+        run: pnpm tauri build
+
+      - name: Upload Windows installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: bandmate-studio-windows-${{ github.ref_name }}-${{ github.sha }}
+          path: |
+            src-tauri/target/release/bundle/msi/*.msi
+            src-tauri/target/release/bundle/nsis/*.exe
+          retention-days: 30
+          if-no-files-found: error
