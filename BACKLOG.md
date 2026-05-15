@@ -8,170 +8,55 @@ Newest entries on top.
 
 ---
 
-## USB Export — progress indicator with ETA, cancel, success/error/canceled states
+## USB Export — clean up orphaned files on the destination
 
-**Where:** `ExportToUsbDialog.tsx` (current "Start export" button + confirm UI). Rust side: `export_to_usb` command in `src-tauri/src/lib.rs` (and likely helpers it calls — check `src-tauri/src/usb.rs` or similar). New event channel from Rust → JS for progress streaming. A new `cancel_export` Tauri command for the cancellation signal.
+**Where:** `export_to_usb` in `src-tauri/src/lib.rs`. Likely a new opt-in option on the `ExportToUsbDialog` confirm step, paired with the existing "Export updates only" toggle but distinct (orphan deletion is destructive; incremental skip is not). New Tauri command if a dedicated "preview orphans" step is wanted before the destructive action.
 
-**Idea:** The current export dialog dismisses or freezes once the user clicks **Start export**, with no feedback on what's happening. For a band copying their working folder (often 5-50 GB) to a USB stick before a show, this is the highest-stakes operation in the whole app and currently feels like the UI hung. Replace the post-click silence with a proper progress state machine: in-progress UI with bytes-based progress bar + ETA + current file + cancel button, followed by an explicit Success / Error / Canceled terminal state.
+**Idea:** An export run sees only what's in the working folder. Files that exist on the USB but no longer exist in the working folder (e.g. a song the user deleted, a playlist they renamed before re-exporting, a stale track map from a previous project) are left untouched on the USB by every existing export mode. Over time the stick accumulates orphan files — songs the band can still see in the BandMate's menu even though they're no longer part of the current set, broken playlist references pointing at deleted songs, etc. This entry covers an explicit "Clean up orphaned files on USB" feature that removes them.
 
-**Why:** USB writes take real time (consumer sticks at 20-100 MB/s; 10-min exports aren't unusual). Without feedback the user can't distinguish "running normally" from "stuck"; some will assume the worst and kill the app mid-write, which is the actual recipe for corrupting the export. A trustworthy progress indicator turns the long wait into a reassuring one, and a working cancel button gives the user the safe escape hatch they'd otherwise reach for by force-quitting. Both reduce the chance of shipping a broken stick to a show.
+**Why:** The 0.10.3 incremental-export feature stops at "don't re-copy what's unchanged." It doesn't and intentionally won't auto-delete from the destination — silent destruction violates the project's reliability principle ("no silent destruction"). But the user pain point is real: after months of edits on the same stick, the BandMate's UI shows ghost songs and the user has to manually nuke the USB and re-export from scratch to get a clean state. An opt-in, confirm-dialog-gated orphan cleanup gives the same outcome with much less friction and without forcing a multi-GB re-write.
 
-**State machine (replaces the current "Start export → dialog dismisses" flow):**
+**State machine sketch:**
 
-1. **Pre-export (current confirm step).** Existing UI with destination + summary. **Add pre-flight checks** before transitioning to in-progress: USB mount still present, USB writable (write+delete a small probe file), enough free space (sum of file sizes BMS plans to copy ≤ available on stick, with a small safety margin — 10 MB is fine). Failures here surface as inline errors on the confirm dialog with the specific remediation ("USB is full — N MB needed, M MB available") and keep the user on the confirm step.
+1. **Detect.** Walk the destination's `bm_media/` tree. For each file under `bm_sources/<song>/`, `bm_trackmaps/*.jcm`, or `bm_media/*.jcp`, check whether a corresponding source path exists in the working folder. Categories:
+   - **Orphan song folder** — destination has `bm_sources/<name>/` but the working folder doesn't.
+   - **Orphan media file** — song folder exists in both, but the destination has a `.wav` / `.mid` not present in the source's song folder. (Could be a re-bounce that renamed the file.)
+   - **Orphan playlist** — `<name>.jcp` on destination, missing from source.
+   - **Orphan track map** — `<name>.jcm` on destination, missing from source.
+   - **Stray file** — anything else under `bm_media/` not matching the above (cautious default: do NOT delete unrecognized files, list them in the preview but require an explicit override).
 
-2. **In-progress.** Replace the confirm content with the progress UI. Persistent header with destination path. Body:
-   - **Progress bar** showing bytes copied / total bytes (not file count — files vary in size from KB `.jcs` files to multi-MB WAVs, so bytes give a smooth honest indicator).
-   - **Percentage** (numeric, integer percent) next to the bar.
-   - **ETA** shown as "About 2 minutes remaining" using a rolling 5-second-window byte rate. For the first 3 seconds OR first 5% (whichever comes first), show "Calculating…" — the first second of a USB write is unreliable due to cache warming and shouldn't drive an estimate the user will trust.
-   - **Current file** ("Copying: ClickCues_buffy.wav") on a third line. Truncate-with-tooltip if it overflows.
-   - **Cancel** button (primary placement; not destructive — the destructive intent is implicit in canceling).
-   - **No close-X on the dialog header** during in-progress; the only ways out are Cancel or completion.
-   - Optional: show a small `n / m files` counter alongside as a secondary signal — some users read file counts more naturally than bytes.
+2. **Preview.** A modal block on the Confirm step lists what would be removed, grouped by category, with byte totals ("This will remove 3 songs, 2 track maps, and 1 playlist totaling 540 MB from the USB"). User can expand each category to see filenames. Default action is **Cancel**; explicit click on **Clean up orphans** to proceed.
 
-3. **Success.** Terminal state with a green checkmark or similar affirmative glyph. Body summarizes what landed on the stick:
-   - `N songs added, M songs updated` (added = didn't exist on the stick before; updated = existed but the BMS-side content was newer or different)
-   - `N playlists added, M playlists updated`
-   - `N trackmaps added, M trackmaps updated`
-   - Total bytes copied, total elapsed time as a footer line ("Copied 4.2 GB in 3 minutes 18 seconds")
-   - **Done** button (primary), and optionally **Eject USB** (tertiary) if the existing `eject_volume` command can run from here — saves the user a Finder trip.
+3. **Confirm.** Second-level "are you sure?" given that this is destructive (`<ask>` style). Lists the volume name being modified so the user can't confuse two plugged-in sticks.
 
-4. **Error.** Terminal state with a warning/error glyph. Body shows:
-   - One-sentence summary ("USB write failed at file 12 of 47.")
-   - Specific error details from the underlying Rust error (path, OS errno, etc.) in a smaller second block. Readable but not the headline.
-   - **State of the USB** disclosed honestly ("Partial copy on USB. N files written before the error. The stick may not play correctly until you re-run the export or restore from backup.")
-   - **Retry** button if the failure is transient (write timeout, USB temporarily unavailable). **Close** button to dismiss.
+4. **Execute.** Delete files (and empty song folders) on the destination. Track per-file outcomes the same way the regular export does. Emit `export-progress`-style events so the dialog can show a progress bar.
 
-5. **Canceling (transient).** When the user clicks Cancel during step 2, show a short "Canceling…" state while the Rust side stops accepting new writes and performs whatever cleanup the cancellation policy demands (see Open Questions). Disable the Cancel button so a second click doesn't double-signal.
-
-6. **Canceled.** Terminal state after cleanup completes. Body explains what state the USB is in (see Open Questions for the policy choice — every option needs honest copy here). **Close** button.
-
-**Progress measurement (Rust → JS event channel):**
-
-- Tauri's `Window.emit("export-progress", payload)` from Rust to stream events. JS subscribes via `listen("export-progress", handler)` in the dialog's mount effect, unsubscribes on unmount.
-- Payload shape: `{ bytesCopied: number, bytesTotal: number, currentFile: string, filesCompleted: number, filesTotal: number }`. Emitted once per file boundary (cheap) — sub-file progress is overkill for files in the typical few-MB range and would flood the channel.
-- For huge files (say >100 MB) consider emitting mid-file progress at 25/50/75% via the `copy_into_folder` helper. Defer until field testing surfaces a need.
-- Terminal events on a separate channel: `export-complete` with the result summary, `export-error` with the error details. Keeps the in-progress channel simple.
-
-**Cancellation signal:**
-
-- New `cancel_export` Tauri command. Frontend invokes it on Cancel click.
-- Rust side holds an `Arc<AtomicBool>` (or a `tokio::sync::watch` channel if the export becomes async) that the file-copy loop checks between file iterations. On detect, break the loop and run cleanup per the chosen policy.
-- Important: cancellation should be cooperative, not preemptive. Don't kill the export thread mid-`fs::copy()` — that's how you get truncated files on the USB. Check the flag between files only.
+5. **Summary.** "Removed N songs, M track maps, K playlists (X MB freed)." Lists names that were removed.
 
 **Implementation notes:**
 
-- Pre-flight checks should run in a single Rust command (`prepare_export` or similar) that returns either a success token with the pre-flight summary or a typed error the dialog renders. Keeping all the FS calls on the Rust side avoids the dialog doing multiple round-trips.
-- The "added vs updated" distinction in the success summary requires the export to track per-file outcomes during the run (was the target path newly created, or did it overwrite an existing file with different content?). Compute this on the Rust side and include in the `export-complete` payload — much easier than recomputing on the JS side.
-- USB free-space check: `sysinfo` (already a dep for the USB enumeration) exposes `available_space` per disk. Cross-check sums in bytes before starting; surface a `not_enough_space` typed error with both numbers in the payload.
-- The progress UI should follow the existing dialog visual family (`CleanupConfirmDialog`, `SaveConfirmDialog`, `SmartImportConfirmDialog`). New `ExportProgressDialog.tsx` (or fold the new states into `ExportToUsbDialog.tsx` if it stays manageable — probably split, the state machine is meaty).
-- ETA computation in JS, not Rust — JS keeps a sliding window of recent `(elapsedMs, bytesCopied)` samples from the progress events and computes a rate from the last ~5 seconds. Pure UI concern; doesn't need to round-trip to Rust.
-- Toast on dialog close: when Success / Error / Canceled terminal states are dismissed, fire a single-slot toast on the editor pane summarizing the outcome ("Exported 4.2 GB to /Volumes/BANDMATE"). Lets the user close the dialog and still see the confirmation. Reuses the existing `Toast` component.
+- **Hidden / system files exempted.** `.DS_Store`, `.bms_writable_probe`, etc. — never delete macOS-system or Studio-internal sidecar files on the USB. The existing `is_export_excluded` list is the right starting filter.
+- **Stray-file conservatism.** If the user has manually placed files on the USB that aren't part of any working folder (a `notes.txt`, a backup, etc.), the feature should preview them but not delete them by default. Add a separate "Also remove unrecognized files" checkbox that defaults off.
+- **Working folder identity.** The detection compares destination paths against the *current* working folder. If the user previously exported from a different working folder to the same stick, files from the previous working folder will all look like orphans. That's the correct call — the destination should mirror the working folder the user is currently exporting from — but the preview wording should make it clear ("These files aren't in your current working folder").
+- **Combine vs separate flow.** Two reasonable shapes:
+  - **(a) Bundled with export.** "Clean up orphans" checkbox on the confirm step; runs after the regular copy. Pros: one workflow. Cons: harder to preview the deletes vs the writes in one dialog.
+  - **(b) Separate "Clean up USB" affordance.** A new button in the editor pane or USB-related submenu that opens its own dialog. Pros: clean separation between additive (export) and destructive (cleanup) operations. Cons: extra navigation surface.
+  
+  Lean (b) — the destructive intent earns its own surface, and users will run cleanup less often than export, so the friction is appropriate.
 
 **Open questions:**
 
-- **Cancellation policy — what does "revert to pre-export state" actually mean?** Three options, increasing in complexity and in user-experience quality:
-  - **(a) Best-effort, no rollback.** Cancel stops new writes; whatever was already on the USB stays. Canceled-state copy: "Export was canceled. N files were already written. The stick may be in an inconsistent state — re-run the export or restore from backup."
-  - **(b) Delete-new-files cleanup.** Track which files on the USB were *newly created* by this export (not pre-existing). On cancel, delete those. Files that were *overwritten* during this export remain in their new state (we don't have the old content to restore). Canceled-state copy: "Export was canceled. New files have been removed from the USB. Files that were updated during the export remain at their new state — re-run the export to fully sync, or restore from backup."
-  - **(c) Staged copy + atomic swap.** Write everything to a temporary directory on the USB first (e.g. `.bm_export_staging/`), then atomic-rename into place at the end of a successful export. Cancellation = delete the staging directory; pre-export USB content is untouched. Cleanest semantics but requires ~2× the export's disk space on the USB temporarily. Some USB stick filesystems (exFAT, FAT32) may not support truly atomic directory renames — needs a Rust-side test.
-
-  Eric's stated requirement is "revert to the state before the export started." That points at (c) as the only fully-honest interpretation. Likely path: ship (b) as v1 (matches the requirement *for the common case where the user is exporting to a fresh stick*) with the honest "files that were updated remain at their new state" caveat; consider (c) as a future enhancement once the rest of the state machine is field-tested.
-
-- **What happens if the USB is unplugged mid-export?** Treat as an error state with specific copy ("USB drive disconnected during export. The stick is in an inconsistent state."). Don't try to recover or wait for re-mount; the user re-runs the export. Detect via OS-level error from the write call, surface immediately. Optional polish: a background heartbeat that checks the mount every few seconds and surfaces the error sooner than the next file write would.
-
-- **What about the `dot_clean -m` step?** Existing export pipeline runs this after the copy to strip AppleDouble files. Should it fire mid-cancel (yes, even partial exports want the stripping) or only on success (no — partial-with-AppleDouble is still wrong)? Probably run unconditionally on any cleanup path that leaves files on the stick.
-
-- **Should the progress bar animate during pre-flight?** Pre-flight is usually subsecond — probably no UI for it. If a check turns out to be slow (free-space on a large stick can take a moment), upgrade to a tiny "Checking USB…" inline indicator before the in-progress UI takes over.
-
-- **Persistence of the dialog through app focus changes:** if the user clicks away to another window during the export, the dialog should stay open in the background. Don't auto-dismiss on blur. (Default behavior, but worth confirming.)
+- **Preview before / after the copy?** If bundled with export, deletes could run before (free up space first, useful for near-full sticks) or after (only act on a successful copy). Probably after — a failed copy followed by orphan deletion could leave the stick in a worse state than where it started.
+- **Should deleting an orphan song folder also delete its `bm_sources/<song>/` directory entry, or just the files inside?** Both. After deleting all files, remove the empty directory so the BandMate's menu doesn't show empty songs.
+- **Recovery / undo?** Not in scope. Once a delete commits, it's gone. The confirm-dialog gate is the safety net.
+- **Cross-validation with playlists.** If a playlist references songs that exist on the USB but those songs are orphans (not in the working folder), should the playlist also count as orphan, or as a "broken playlist" warning? Probably orphan — a playlist whose songs no longer exist in the working folder is itself stale.
 
 **Phased proposal:**
 
-This entry is big enough to ship in two or three PRs rather than one:
+1. **PR 1.** Detection + read-only preview (no delete). Opens a new "Inspect USB" dialog that shows what's on the stick that's not in the working folder. Pure information; nothing destructive. Validates the detection heuristic across real working folders before any code goes near `fs::remove_*`.
+2. **PR 2.** Confirmation flow + the actual delete. Behind the explicit user click. Includes the progress + summary terminal states.
+3. **PR 3 (optional).** Stray-file handling under a separate opt-in checkbox.
 
-1. **PR 1 — Rust progress events + JS in-progress UI.** Pre-flight, progress bar, ETA, current-file display. Cancel button shows but invokes a placeholder that just stops new writes (cancellation policy (a) — no cleanup). Terminal Success / Error states with the summary copy. No revert yet.
-2. **PR 2 — Cancellation policy (b).** Track newly-created files; delete on cancel. Canceled terminal state with honest copy.
-3. **PR 3 (optional, defer) — Staged-copy policy (c).** Only if (b) feels insufficient in practice. Likely a follow-up after field use.
-
-Ship PR 1 first — that's where the bulk of user value is (the "is it hung?" anxiety is solved). PRs 2 and 3 are quality polish on top.
-
-**Captured:** 2026-05-14
+**Captured:** 2026-05-15 (during 0.10.3 incremental-export planning; deferred to keep the incremental PR scoped to the safe non-destructive case).
 
 ---
-
-## Sidebar — keyboard arrow navigation when no editor sub-selection is active
-
-**Where:** Top-level keyboard handler in `App.tsx` (lives next to the existing ESC handler that clears editor sub-selections before falling back to clearing the sidebar selection). `Sidebar.tsx` exposes the ordered lists of songs / playlists / track maps. `AppState` already owns `sidebarSelection` (kind + value) and the editor sub-selections (`channelSelection`, `playlistRowSelection`).
-
-**Idea:** When the user has an item selected in the sidebar but no sub-selection in the editor (no channel highlighted in the song editor, no row highlighted in the playlist editor), ↑/↓ should walk through the sidebar items in the *same category* as the current selection. Up at the top edge is a no-op (don't wrap), down at the bottom edge is a no-op. Same gating as the ESC chain: the keyboard handler only engages when no editor sub-selection is consuming arrows itself.
-
-**Why:** The fast common-case navigation today is *click each song / playlist / track map in the sidebar*. For users running through a working folder to spot-check artifacts, arrow-key walking is significantly faster — no mouse, eyes stay on the editor pane that updates as you walk. The ESC chain already establishes "the sidebar selection is a top-level thing that's distinct from the editor's sub-selection"; arrow navigation extends that mental model from "I can clear it with ESC" to "I can walk it with arrows."
-
-**Implementation notes:**
-- Gating mirrors the ESC chain. Pseudocode for the top-level handler: `if (editor.channelSelection != null || editor.playlistRowSelection != null) return; // editor consumes arrows`. Otherwise, dispatch `select_sidebar_neighbor({ delta: -1 | 1 })`.
-- The category to walk within: derive from `sidebarSelection.kind` (`"song"` / `"playlist"` / `"trackMap"`). Don't cross category boundaries — ↓ at the last song shouldn't jump into playlists. Stop at the boundary; let the user click into the next section if they want to switch.
-- Ordering: match the visible sidebar order. For songs / playlists that's user-defined; for track maps the templates group sits above the user-defined ones (per the `Template` badge convention). Walk through the section in display order, including templates.
-- Unsaved-changes guard: route the move through `requestSelect` (the same primitive used elsewhere) so an unsaved editor blocks the navigation with the existing confirm dialog. Don't bypass the dirty check.
-- Focus behavior: the sidebar list doesn't need to *gain* focus for arrows to work — the top-level handler engages regardless of focus, as long as no editor sub-selection is active. If a text input is focused (e.g. user is renaming a song), arrow keys should belong to that input — check `document.activeElement` for editable surfaces and let those win.
-- Cursor visibility: when the selection moves, scroll the sidebar so the newly-selected item stays in view (sidebar may be longer than the viewport once a band has 50+ songs).
-
-**Open questions:**
-- Should ↑/↓ at a section boundary *visibly fail* (brief shake / no-op feedback) or be silent? Lean silent — matches how arrow nav works elsewhere; the boundary is implicit.
-- Cmd+↑ / Cmd+↓ to jump to the section's first / last item? Useful for long lists, mirrors macOS conventions. Defer until the basic ↑/↓ is settled; ship as a follow-up if it earns its keep.
-- Tab to walk *across* sections (Songs → Playlists → Track Maps)? Probably not — Tab has standard meaning and overloading it is risky. If cross-section traversal becomes a need, J/K or `[` / `]` style shortcuts are safer.
-
-**Captured:** 2026-05-14
-
----
-
-## Song editor — stopwatch icon on all rows tied for longest duration
-
-**Where:** `SongEditor.tsx` longest-file detection (search for `longestFilename` — currently a `string | null`). `ChannelGrid.tsx` `AudioRow` / `MidiRow` `isLongest` prop (currently a `boolean` derived from `filename === longestFilename`).
-
-**Idea:** Today only one channel row gets the stopwatch icon — the first/only file whose duration matches the song's `<length>`. When multiple media files share the maximum length (e.g. a click track and a backing stem both exported at the same exact length, or a WAV and the MIDI ending at the same sample boundary), every tied file should show the stopwatch, not just one.
-
-**Why:** The stopwatch indicates "this file determines the song's overall duration." When ties exist, the *set* of files matters — any of them ending earlier wouldn't shorten the song, but all of them ending later would extend it. Surfacing only one is misleading: it implies the others are shorter when they're actually equal. For users debugging a length issue ("why is this song running 3 seconds longer than I expect?"), seeing all the tied rows points them at the right candidates immediately.
-
-**Implementation notes:**
-- Compare durations in **samples**, not seconds. `song.lengthSamples` is an integer (per the codec); each file's `lengthSamples` from the WAV header probe is also integer; MIDI length converted to samples likewise. Integer equality avoids floating-point precision traps where two files round to the same `m:ss` but differ by a few samples (or vice versa).
-- Replace `longestFilename: string | null` with `longestFilenames: Set<string>` (or equivalently a `Set<channel>` keyed by channel index — pick whichever flows more naturally through `ChannelGrid`'s prop passing).
-- Update detection logic to pass through all files and collect those whose sample count equals the song's max. The max itself is still derived from the longest file (or `song.lengthSamples` directly).
-- Each `AudioRow` checks `longestFilenames.has(filename)` (or `.has(channel)`); same for `MidiRow`. Tooltip can stay the same — "Longest file in this song (m:ss) — its length sets the song's overall duration." Singular phrasing reads fine even when multiple rows show it; the icon's presence on multiple rows tells the story.
-- MIDI participation: the F-2 fix made `<length>` include MIDI duration. If a MIDI file ties with WAVs at the max, the MIDI row gets the stopwatch alongside the tied audio rows. Already partially handled — just need the set membership check rather than the single-filename equality.
-- Per-row change-dot precedence: the change dot still wins over the stopwatch on individual rows (per the precedence flip in 0.7.1). Multiple tied rows that are all unedited will show stopwatches; if one is edited, that row shows the dot and the others keep their stopwatches. No special-case needed — the existing precedence applies row-by-row.
-
-**Open questions:**
-- Visual styling unchanged? Probably yes — multiple identical icons is the correct visual story for "these are all the same length." If it gets noisy in practice (a song with 8 stems all exported to identical length showing 8 stopwatches), consider a subtler treatment for ties only (smaller icon, lighter color, or a numeric badge like "× 3" on one row). Cross that bridge after seeing it in real working folders.
-- Tooltip wording: keep singular ("Longest file in this song"), pluralize ("One of the longest files…"), or split based on count? Lean keep-singular — the on-screen evidence of multiple stopwatches conveys the multiplicity without prose, and the tooltip's existing copy reads correctly for each individual row regardless of how many others share the property.
-
-**Captured:** 2026-05-14
-
----
-
-## Playlist editor — Duration column in the song list
-
-**Where:** `PlaylistEditor.tsx` → `PlaylistSongList` (around line 773). The grid template `COLS = "grid-cols-[40px_1fr_auto_72px]"` (row # / name / status pill / actions) needs a new column for the per-song duration; same component owns the header and the row renders.
-
-**Idea:** Show each song's duration (`m:ss`) as a new column in the playlist's ordered-song list. Sums up automatically into a footer/header total so the user can see the playlist's full runtime at a glance.
-
-**Why:** Today the playlist editor shows only song names and status pills — no length information. Bands typically build set lists with a target runtime in mind ("we have a 45-min slot, need ~9 songs"). Per-song duration plus a roll-up total turns the playlist editor into a real set-list-planning tool instead of just an ordered-name list. Mirrors the song-duration affordance already in the song editor's caption (`3:22 · 5 files`).
-
-**Implementation notes:**
-- Duration source: each referenced song's `.jcs` exposes `<length>` (samples) + `<sample_rate>`. Duration in seconds = `lengthSamples / sampleRate`. Format with the existing `formatDuration` helper in `ChannelGrid.tsx` — lift it to `lib/duration.ts` if it doesn't already live somewhere shared.
-- Lookup strategy: don't parse all referenced songs on every playlist-editor render. Two options:
-  - **A. Cache on the workspace state.** Whatever already drives the sidebar's song inventory (probably `AppState`) holds song metadata for songs in the working folder. Add `durationSeconds` to that metadata so the playlist list can read it synchronously. Best long-term — other surfaces (sidebar tooltip, USB-export confirm) will want this too.
-  - **B. Per-playlist-open async fetch.** Parse each referenced song on playlist open, memoize for the lifetime of the editor mount. Cheaper to implement; fine if A is a bigger lift.
-- Missing-song handling: a playlist can reference a song the user has since deleted (status pill already surfaces this as a warning). The duration column should render `—` for missing songs and exclude them from the roll-up total.
-- Header total: render in the existing `<header>` near the song count, e.g. `5 songs · 23:14`. Keep the existing song-count text — runtime is additive.
-- Sample-rate mismatch: if a referenced song's sample rate doesn't match the playlist's, the duration computation is still correct (it's just `samples / rate`), so no special-case needed. The existing rate-mismatch warning is separate from this column.
-- Grid template update: `grid-cols-[40px_1fr_56px_auto_72px]` — slot a fixed-width duration column between name and status. 56px fits `mm:ss` mono-tabular cleanly; left/right alignment TBD during build.
-
-**Open questions:**
-- Should the duration column be sortable / drive a reorder? Probably no — the playlist order IS the set-list order, surfacing duration for read-only awareness is the value. Don't overload.
-- Tooltip on the column / total — worth showing "longest media file" attribution? Maybe, but the row's existing tooltip is already busy; the duration value alone is probably enough.
-
-**Captured:** 2026-05-14
-
----
-
-

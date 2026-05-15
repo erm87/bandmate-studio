@@ -337,7 +337,20 @@ export function SongEditor({ jcsPath }: Props) {
       cachedTrackMap = { path: trackMapSource, filename, map: trackMap };
     }
   }, [trackMap, trackMapSource]);
-  const [longestFilename, setLongestFilename] = useState<string | null>(null);
+  /**
+   * Filenames whose duration equals the song's longest media duration.
+   * Usually a single filename, but multiple when files are tied at the
+   * max sample count — every tied file shows the stopwatch icon in the
+   * channel grid (any of them ending earlier wouldn't shorten the song,
+   * but extending any would extend the song's `<length>`).
+   *
+   * Comparison is done in samples (integer), not seconds, so two files
+   * that round to the same `m:ss` but differ by a handful of samples
+   * don't get spuriously grouped.
+   */
+  const [longestFilenames, setLongestFilenames] = useState<Set<string>>(
+    () => new Set(),
+  );
   /**
    * Counter bumped after save / save-as / manual MIDI clean. Threaded
    * to SourceFilesPane's Song Folder tab so its file listing (and any
@@ -660,7 +673,13 @@ export function SongEditor({ jcsPath }: Props) {
         );
         const assignedMidi = draftSong.midiFile?.filename ?? null;
         const songRate = draftSong.sampleRate;
-        let longest: { name: string; samples: number } | null = null;
+        // Two-pass: find the max sample count, then collect every
+        // assigned file that ties at that max. Comparing in samples
+        // (integer) rather than seconds avoids false ties between
+        // files that round to the same `m:ss` but differ by a few
+        // samples (or false splits in the reverse direction).
+        let maxSamples = 0;
+        const samplesByName = new Map<string, number>();
         for (const f of list) {
           const isAssignedWav =
             f.kind === "wav" && assignedWavs.has(f.filename);
@@ -670,16 +689,21 @@ export function SongEditor({ jcsPath }: Props) {
           const samples = Math.round(
             (f.durationSeconds ?? 0) * songRate,
           );
-          if (longest === null || samples > longest.samples) {
-            longest = { name: f.filename, samples };
+          samplesByName.set(f.filename, samples);
+          if (samples > maxSamples) maxSamples = samples;
+        }
+        const longestSet = new Set<string>();
+        if (maxSamples > 0) {
+          for (const [name, samples] of samplesByName) {
+            if (samples === maxSamples) longestSet.add(name);
           }
         }
-        setLongestFilename(longest?.name ?? null);
+        setLongestFilenames(longestSet);
       })
       .catch(() => {
         if (!cancelled) {
           setFolderFiles([]);
-          setLongestFilename(null);
+          setLongestFilenames(new Set());
         }
       });
     return () => {
@@ -1710,8 +1734,11 @@ export function SongEditor({ jcsPath }: Props) {
       // BandMate plays long enough for any trailing program changes
       // at the end of the MIDI to fire before auto-advancing.
       const songRate = s.snapshot.song.sampleRate;
+      // Two-pass: collect samples per file, then derive both the max
+      // and the set of files tied at that max. Multiple ties mean
+      // multiple rows get the stopwatch icon in the channel grid.
+      const samplesByName = new Map<string, number>();
       let maxSamples = 0;
-      let newLongest: string | null = null;
       for (const f of list) {
         const isAssignedWav =
           f.kind === "wav" && assignedWavs.has(f.filename);
@@ -1722,9 +1749,13 @@ export function SongEditor({ jcsPath }: Props) {
         // we write into <length> is in the same units as BM Loader's.
         const seconds = f.durationSeconds ?? 0;
         const samples = Math.round(seconds * songRate);
-        if (samples > maxSamples) {
-          maxSamples = samples;
-          newLongest = f.filename;
+        samplesByName.set(f.filename, samples);
+        if (samples > maxSamples) maxSamples = samples;
+      }
+      const newLongestSet = new Set<string>();
+      if (maxSamples > 0) {
+        for (const [name, samples] of samplesByName) {
+          if (samples === maxSamples) newLongestSet.add(name);
         }
       }
       const finalSong: Song = {
@@ -1745,7 +1776,7 @@ export function SongEditor({ jcsPath }: Props) {
           baseline: newCurrent,
         };
       });
-      setLongestFilename(newLongest);
+      setLongestFilenames(newLongestSet);
       // Bump so SourceFilesPane's Song Folder tab re-lists — files
       // may have been copied in and / or auto-cleaned in place.
       setSongFolderRefreshKey((k) => k + 1);
@@ -2020,7 +2051,7 @@ export function SongEditor({ jcsPath }: Props) {
           song={draftSong}
           channelLabels={labels}
           channelChanges={channelChanges}
-          longestFilename={longestFilename}
+          longestFilenames={longestFilenames}
           longestDurationSeconds={
             draftSong.lengthSamples / draftSong.sampleRate
           }

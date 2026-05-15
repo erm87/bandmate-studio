@@ -884,7 +884,7 @@ function SidebarRow({
  * These render at the top of the Track Maps section with a "Template"
  * badge so they read as starter content rather than user data.
  */
-const SEEDED_TRACKMAP_FILENAMES = new Set([
+export const SEEDED_TRACKMAP_FILENAMES = new Set([
   "default_tm.jcm",
   "stems_tm.jcm",
 ]);

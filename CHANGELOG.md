@@ -6,6 +6,98 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.10.5] — 2026-05-15
+
+### Fixed
+
+- **Export to USB — pre-selection of remembered destination now actually works.** The destination validator (`file_exists` → renamed to `path_exists`) was calling `Path::is_file()`, which returns false for directories. Every USB mount point is a directory (`/Volumes/<name>`), so the check always failed, the candidate fell through, and the user had to re-pick the drive every time — regardless of whether the destination came from session memory or the Settings default. Renamed the Rust command + JS wrapper to `path_exists` and switched the implementation to `Path::exists()`, which returns true for files AND directories. The 0.10.4 dispatch-on-pick change was correct; this was the missing piece. ([src-tauri/src/lib.rs](src-tauri/src/lib.rs), [workingFolder.ts](src/fs/workingFolder.ts), [ExportToUsbDialog.tsx](src/components/ExportToUsbDialog.tsx))
+
+### Notes
+
+- Pre-existing bug — the `file_exists` command was added back when its only caller was a song-editor file copy check (regular files). The export-dialog pre-selection added in 0.9.x reused it for directory paths, where the semantics broke silently. Caught by 0.10.4 user testing. Continuing the `0.10.x` themed bundle.
+
+## [0.10.4] — 2026-05-15
+
+### Changed
+
+- **Export to USB — destination remembered as soon as it's picked.** Previously the session-sticky `lastExportDestPath` was only dispatched after a *successful* export, so a partial session (user picks a USB, closes the dialog without clicking Start, or hits the Change button mid-confirm) wouldn't pre-select on the next open. The dispatch now fires in `handlePickDest` immediately after the user confirms the folder picker, so subsequent dialog opens jump straight to the Confirm step whenever the chosen path is still mounted. Stale paths (drive ejected since) still fall through to the picker via the existing `fileExists` validation, then clear the stale session entry. ([ExportToUsbDialog.tsx](src/components/ExportToUsbDialog.tsx))
+- **Export to USB — PickStep copy.** Reworded to *"Choose the USB stick to export your songs and playlists onto. This will be the USB stick you plug into the BandMate unit for playback."* The old line ("Choose your BandMate USB stick to copy bm_media/ onto") leaked an implementation detail (`bm_media/`) that doesn't help a band member who just wants to ship a set.
+
+### Added
+
+- **Toast confirmation on successful eject.** A non-blocking toast — *"USB device ejected."* — fires in the editor pane right after `diskutil eject` succeeds, replacing the previous silent close. `WorkingFolderBar` owns the toast (it survives the export dialog's unmount on close); the dialog signals via a new `onEjected` callback prop fired before `onClose`. ([WorkingFolderBar.tsx](src/components/WorkingFolderBar.tsx), [ExportToUsbDialog.tsx](src/components/ExportToUsbDialog.tsx))
+
+### Notes
+
+- Continuing the `0.10.x` themed bundle (USB export iteration). CI gates green (typecheck, vitest, version + changelog sync, `cargo check`).
+
+## [0.10.3] — 2026-05-15
+
+### Added
+
+- **USB Export — "Export updates only" incremental mode.** New checkbox on the export Confirm step (default off, session-sticky in `AppState`) that skips files whose size and modification time on the USB match the working folder. Multi-GB repeat exports against the same stick now take seconds instead of minutes when only a few files have changed. Pre-flight panel shows both totals simultaneously ("Full: 168 files, 3.29 GB · Updates only: 12 files, 124 MB") with the active mode's line in stronger weight. Free-space check uses the active mode's size so an incremental run isn't blocked unnecessarily on a near-full stick. The Success screen adds a "N files unchanged (skipped)" bullet only when incremental was used. Tooltip on the checkbox explains: *"Skips files already on the USB whose size and modification time match the working folder. Much faster for repeat exports. Updated files (including same-name replacements) are always re-copied — any content change updates the file's modification time. Turn off if you want a guaranteed full re-write."* ([ExportToUsbDialog.tsx](src/components/ExportToUsbDialog.tsx), [src-tauri/src/lib.rs](src-tauri/src/lib.rs))
+
+### Changed
+
+- **Export to USB — destination mtimes now mirror the source.** `fs::copy` doesn't preserve mtime by default — destination files used to get "current time" stamps, meaning every future incremental export would see them as "changed." After each copy we now call `File::set_modified` (stable since Rust 1.75) to sync the destination's mtime to the source's. Side benefit beyond enabling incremental: USB files in Finder now show their actual edit dates rather than the last-export date. 2-second tolerance on comparison to absorb FAT32's coarse mtime resolution. ([src-tauri/src/lib.rs](src-tauri/src/lib.rs))
+- **Export tallies — songs only count when files were actually written.** Previously the `songs added` / `songs updated` counts captured every song folder we entered, including ones where the include-filter excluded every file. With incremental mode it's also common to enter a song folder and skip every file. The tally now defers the song bookkeeping until the first actual `fs::copy` succeeds inside that folder, so a song with zero writes doesn't appear in either added or updated. Matches what the user expects from the Success screen.
+
+### Notes
+
+- **Detection heuristic — size + mtime, no content hash.** Any content change rewrites bytes, which updates mtime, so false negatives (changed file treated as unchanged) require modifying a file without touching its mtime — impossible through normal user workflows. False positives just cause a slow but correct re-copy. Hashing would be more theoretically reliable but reads every byte of every WAV, which cancels the speedup. Same heuristic that `rsync`, Time Machine, and most incremental-copy tools default to.
+- **Orphan files on the USB are NOT cleaned up by this PR.** A song deleted from the working folder still sits on the USB after an incremental export. The "no silent destruction" principle from CLAUDE.md keeps that out of scope here; captured in [BACKLOG.md](BACKLOG.md) as the *USB Export — clean up orphaned files on the destination* entry with a phased proposal (PR1: preview only; PR2: gated delete; PR3 optional: stray-file handling).
+- Patch bump per the project's convention during alpha — feature is opt-in (default off, behind a checkbox) and doesn't change behavior for anyone not toggling it on. CI gates green (typecheck, vitest, version + changelog sync, `cargo check`).
+
+## [0.10.2] — 2026-05-15
+
+### Added
+
+- **Export to USB — Success screen now itemizes what landed on the stick.** Beyond the total bytes/time footer, the green Success block now lists per-category added vs updated counts: "2 songs added, 1 song updated · 1 playlist updated · 3 track maps updated." Counts are tracked in the Rust copy loop — songs at folder-entry (any file write inside `bm_sources/<song>/` tags the song once), playlists/trackmaps at per-file granularity. Pluralization handled per side, and a side is omitted entirely when its count is zero (no "0 songs added" noise). Matches what the BACKLOG entry called for. ([src-tauri/src/lib.rs](src-tauri/src/lib.rs), [ExportToUsbDialog.tsx](src/components/ExportToUsbDialog.tsx))
+- **Export to USB — "Ejecting…" terminal state with indeterminate spinner.** Clicking Eject now transitions the dialog to a dedicated `step: "ejecting"` view (animated Tailwind `animate-spin` SVG + heading + context line: "macOS is flushing any remaining writes…"). No interactive elements during the eject (it can't be safely canceled). Replaces the previous behavior where the button just dimmed and the macOS beachball appeared while `diskutil eject` ran — the user couldn't tell whether the app had hung. Follows Apple HIG for indeterminate short-duration tasks. ([ExportToUsbDialog.tsx](src/components/ExportToUsbDialog.tsx))
+
+### Changed
+
+- **Export to USB — Eject button disabled when the destination isn't a removable volume.** Rust's `ExportSummary` now carries an `is_ejectable` flag computed via sysinfo (`Disk::is_removable()` for the disk whose mount-point is the longest prefix of the destination path). When false (internal HDD, system disk, etc.) the Eject button is disabled with a native browser tooltip on hover: "Eject only applies to removable volumes (USB sticks, SD cards). The chosen destination isn't ejectable." Removes a class of confusing `diskutil eject` errors against non-ejectable paths. ([src-tauri/src/lib.rs](src-tauri/src/lib.rs))
+
+### Fixed
+
+- **Export to USB — eject no longer beachballs the app.** `eject_volume` is now an `async fn` that wraps the `diskutil eject` invocation in `tauri::async_runtime::spawn_blocking` — same fix pattern as `export_to_usb` in 0.10.1. The actual eject still takes a few seconds (macOS flushes writes), but the new Ejecting state with the spinner now communicates this clearly while the IPC bridge stays responsive. ([src-tauri/src/lib.rs](src-tauri/src/lib.rs))
+
+### Notes
+
+- Continues the 0.10.0 testing-fix line: surfaced during hands-on testing of 0.10.1's export flow, bundled as a patch per the same convention. CI gates green (typecheck, vitest, version + changelog sync, `cargo check`).
+
+## [0.10.1] — 2026-05-15
+
+### Fixed
+
+- **Export to USB: Success / Canceled terminal states were unreachable.** The dialog dispatched `set_last_export_dest_path` on a successful export, and that action lived in the main `useEffect`'s dep array — so the effect re-ran, reset the dialog to the "pick" step, the async candidate-resolution then jumped it back to "confirm", and the Done / Canceled state never had a chance to render. Destination hints (`lastExportDestPath`, `defaultExportDestPath`) now flow through refs so the dispatch can't cause a self-rerun. The effect only re-initializes when `isOpen` actually toggles. ([ExportToUsbDialog.tsx](src/components/ExportToUsbDialog.tsx))
+- **Export to USB: rainbow-spinner freeze during the actual copy.** Although the Rust `export_to_usb` was a sync `fn` command (which Tauri runs on its async runtime, not the main thread), reports during 0.10.0 testing showed the macOS app beachballing for the duration of a multi-GB copy with no in-progress UI visible. Both `export_to_usb` and `prepare_export` are now `async fn`s that wrap their bodies in `tauri::async_runtime::spawn_blocking`, the documented Tauri pattern for long-running synchronous I/O — the export runs on a dedicated blocking-thread pool and the runtime worker that handled the IPC call stays free to deliver `export-progress` events to the webview. ([src-tauri/src/lib.rs](src-tauri/src/lib.rs))
+
+### Added
+
+- **Playlist editor — Running Time (Total) column.** A new column sits next to Time and shows the cumulative playlist time through end of each song (`m:ss`, switching to `h:mm:ss` past one hour). Set-list planning now reads at a glance — "we hit the 30-min mark after Hot Head" — without doing the math row-by-row. Missing or rate-mismatched rows render `—` for both Time and Total, matching the existing header roll-up's convention of only summing `ok` rows; subsequent `ok` rows still show their sum-through-this-row so the user can plan around a fixable gap. Grid template: `40px_1fr_56px_72px_auto_72px`. Captured during 0.10.0 testing; bundled with the two export-dialog fixes since the addition is small and scoped to the same test pass. ([PlaylistEditor.tsx](src/components/PlaylistEditor.tsx))
+
+### Notes
+
+- Patch bump because the trigger for this release was 0.10.0 testing surfacing real bugs; the Running Time column ships as a small bundled addition rather than a separate minor. CI gates (typecheck, vitest, version + changelog sync, `cargo check`) green.
+
+## [0.10.0] — 2026-05-15
+
+### Added
+
+- **USB Export — progress dialog with ETA, cancel, and explicit terminal states.** The "Start export" click no longer hands the user a frozen modal for a multi-GB write. Pre-flight runs first (`prepare_export` Tauri command) and surfaces "USB is read-only" / "USB is too full — needs X, has Y" inline on the Confirm step before the copy starts. The in-progress UI shows a bytes-based progress bar with percentage, an ETA derived from a rolling 5-second byte-rate sample ("Calculating…" for the first 3s / 5%, then "About N minutes remaining"), the current filename, and a Cancel button. Cancellation is cooperative — Rust's `cancel_export` command flips a static `AtomicBool` that the copy loop checks between files; `fs::copy()` never gets interrupted mid-stream, so the USB can't end up with a truncated file. Three terminal states replace the previous opaque "Done": Success (green check, elapsed time, optional Eject), Canceled (amber, honest "stick may be inconsistent — re-run or restore from backup" copy with `N of M files` counters), and Error (red with retry). PR1 of the phased plan in BACKLOG; cancellation policy (b) — delete-new-files cleanup — and policy (c) — staged-copy atomic swap — remain deferred. ([ExportToUsbDialog.tsx](src/components/ExportToUsbDialog.tsx), [src-tauri/src/lib.rs](src-tauri/src/lib.rs))
+- **Sidebar — ↑ / ↓ arrow-key navigation within the selected section.** When a sidebar item is selected and no editor sub-selection is active (no channel highlighted in the Song editor, no row highlighted in the Playlist editor), arrows walk through Songs / Playlists / Track Maps in the same section as the current selection. No wrap at section boundaries — ↑ at the first row and ↓ at the last row are silent no-ops. Gating mirrors the existing ESC chain; navigation routes through `requestSelect` so the unsaved-changes guard still intercepts. Modifier-arrows (Cmd / Ctrl / Alt / Shift) and arrows inside focused text inputs pass through unmodified. ([App.tsx](src/App.tsx), [Sidebar.tsx](src/components/Sidebar.tsx))
+- **Playlist editor — Duration column in the song list.** Each row now shows the song's runtime (`m:ss`) in a new 56px column between Song name and the status badge. Missing or rate-mismatched songs render `—`; the existing header roll-up (`5 songs · 23:14`) already aggregated `ok` durations so totals stay consistent. Set-list planning ("we have a 45-min slot, need ~9 songs") no longer requires bouncing between the playlist and the per-song editor. ([PlaylistEditor.tsx](src/components/PlaylistEditor.tsx))
+
+### Changed
+
+- **Song editor — stopwatch icon now renders on every row tied for longest media duration.** Previously the icon attached to the first file that hit the max, even when other assigned files matched the same sample count. Multiple ties is the correct visual story for "any of these files ending earlier wouldn't shorten the song." The detection state moved from `longestFilename: string | null` to `longestFilenames: Set<string>` in both [SongEditor.tsx](src/components/SongEditor.tsx) and [ChannelGrid.tsx](src/components/ChannelGrid.tsx); per-row change-dot precedence (0.7.1) is unchanged. Comparison stays in samples (integer) so two files rounding to the same `m:ss` but differing by a few samples don't spuriously merge. Tooltip wording is unchanged — singular reads correctly on each individual row even when several rows share it.
+
+### Notes
+
+- All four backlog entries that drove this bump (USB Export progress, sidebar arrow nav, tied-longest stopwatch, playlist duration column) ship together. Captured 2026-05-14 / 2026-05-15; pulled from `BACKLOG.md`'s active list now that they're shipped. The deferred USB Export cancellation policies (PR2: delete-new-files cleanup; PR3 optional: staged-copy atomic swap) remain unship and will be re-captured in `BACKLOG.md` if field use shows the current best-effort cancel is insufficient.
+
 ## [0.9.4] — 2026-05-15
 
 ### Added

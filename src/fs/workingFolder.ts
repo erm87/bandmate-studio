@@ -116,9 +116,15 @@ export async function isMidiClean(path: string): Promise<boolean> {
   return invoke<boolean>("is_midi_clean", { path });
 }
 
-/** True if a file exists at the given path. */
-export async function fileExists(path: string): Promise<boolean> {
-  return invoke<boolean>("file_exists", { path });
+/**
+ * True if a path exists on disk — file OR directory. The export
+ * dialog uses this to validate a remembered USB destination before
+ * pre-selecting it; `/Volumes/<name>` is a directory, so the older
+ * file-only check always returned false and broke the pre-selection
+ * flow.
+ */
+export async function pathExists(path: string): Promise<boolean> {
+  return invoke<boolean>("path_exists", { path });
 }
 
 /**
@@ -147,8 +153,64 @@ export interface ExportProgress {
 export interface ExportSummary {
   filesCopied: number;
   bytesCopied: number;
+  totalFiles: number;
+  totalBytes: number;
   /** True if dot_clean -m ran on macOS. False on other platforms. */
   dotCleaned: boolean;
+  /** True if the export was halted by a `cancelExport` call. */
+  wasCanceled: boolean;
+  /** Elapsed wall-clock time of the export in milliseconds. */
+  elapsedMs: number;
+  /**
+   * Added vs updated breakdown rendered on the Success screen. Songs
+   * are tallied at the folder level (any file write inside a song
+   * folder counts the song once); playlists / trackmaps at the
+   * individual-file level. "Added" = destination didn't exist before
+   * this export started; "updated" = destination existed and was
+   * overwritten with the source's content. Files we never wrote
+   * (filter-excluded, or a partial cancel) don't contribute.
+   */
+  songsAdded: number;
+  songsUpdated: number;
+  playlistsAdded: number;
+  playlistsUpdated: number;
+  trackmapsAdded: number;
+  trackmapsUpdated: number;
+  /** True if this export ran with the incremental flag on. */
+  wasIncremental: boolean;
+  /** Count of files skipped because size+mtime matched the destination. */
+  filesUnchanged: number;
+  /**
+   * True if `destPath` resolves to a removable volume that
+   * `ejectVolume` could plausibly act on. False for the internal
+   * system disk or any non-removable destination — the Eject button
+   * is disabled (with an explanatory tooltip) in that case so the
+   * user doesn't get a confusing `diskutil` error.
+   */
+  isEjectable: boolean;
+}
+
+/** Mirrors the Rust `ExportPreFlight`. */
+export interface ExportPreFlight {
+  totalFiles: number;
+  totalBytes: number;
+  /**
+   * Files / bytes that would actually be copied under incremental
+   * mode (destination doesn't exist, or size/mtime differs). For a
+   * fresh USB these equal `totalFiles` / `totalBytes`; after a
+   * re-export to the same stick with small edits, typically a
+   * small fraction.
+   */
+  incrementalFiles: number;
+  incrementalBytes: number;
+  /**
+   * Free space on the destination volume in bytes. 0 means "couldn't
+   * determine" — treat as unknown and let the actual write surface
+   * the failure rather than blocking the export.
+   */
+  availableBytes: number;
+  /** True if a probe-file write+delete succeeded under `destPath`. */
+  isWritable: boolean;
 }
 
 /**
@@ -179,13 +241,48 @@ export interface ExportIncludeFilter {
 export async function exportToUsb(
   workingFolder: string,
   destPath: string,
-  includeFilter?: ExportIncludeFilter | null,
+  includeFilter: ExportIncludeFilter | null,
+  incremental: boolean,
 ): Promise<ExportSummary> {
   return invoke<ExportSummary>("export_to_usb", {
     workingFolder,
     destPath,
     includeFilter: includeFilter ?? null,
+    incremental,
   });
+}
+
+/**
+ * Pre-flight check for an export: how much will be copied, how much
+ * free space the destination has, and whether the destination is
+ * writable. Run on the confirm step before transitioning to the
+ * in-progress UI so we can surface "USB is full" / "USB is read-only"
+ * inline rather than partway through a failing copy.
+ */
+export async function prepareExport(
+  workingFolder: string,
+  destPath: string,
+  includeFilter?: ExportIncludeFilter | null,
+): Promise<ExportPreFlight> {
+  return invoke<ExportPreFlight>("prepare_export", {
+    workingFolder,
+    destPath,
+    includeFilter: includeFilter ?? null,
+  });
+}
+
+/**
+ * Signal a running `exportToUsb` call to halt at the next file
+ * boundary. Cooperative — never interrupts a file copy mid-stream
+ * because the OS could leave a truncated file on the USB. The actual
+ * halt happens between files (within a few hundred ms in practice).
+ *
+ * The original `exportToUsb` promise resolves with
+ * `wasCanceled: true` once the halt completes; the JS side renders
+ * a "Canceled" terminal state from that.
+ */
+export async function cancelExport(): Promise<void> {
+  await invoke<void>("cancel_export");
 }
 
 /**

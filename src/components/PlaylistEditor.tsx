@@ -39,6 +39,7 @@ import {
 } from "../fs/workingFolder";
 import { suggestDuplicateName } from "../lib/references";
 import { diffPlaylists } from "../lib/snapshotDiff";
+import { formatDuration } from "../lib/duration";
 import { useAppState } from "../state/AppState";
 import { cn } from "../lib/cn";
 import {
@@ -596,6 +597,26 @@ export function PlaylistEditor({ jcpPath }: Props) {
           (acc, s) => acc + (s.kind === "ok" ? s.durationSeconds : 0),
           0,
         );
+  // Running totals per row: cumulative seconds from start of the
+  // playlist through end of THIS song. Only `ok` rows contribute,
+  // matching the header total's convention. Non-ok rows (missing /
+  // rate-mismatched) have an unknown contribution, so their cell
+  // renders "—" — but a later `ok` row still shows the sum-through-
+  // it as if the gap weren't there, which is the most useful read
+  // for planning ("this is what the set hits once the missing one
+  // gets fixed").
+  const runningTimesSeconds: (number | null)[] = [];
+  {
+    let cumulative = 0;
+    for (const s of songStatuses) {
+      if (s.kind === "ok") {
+        cumulative += s.durationSeconds;
+        runningTimesSeconds.push(cumulative);
+      } else {
+        runningTimesSeconds.push(null);
+      }
+    }
+  }
   // Use null in the header when we genuinely don't know yet (songs in
   // the playlist whose meta hasn't loaded). For an empty playlist,
   // 0 is correct.
@@ -640,6 +661,7 @@ export function PlaylistEditor({ jcpPath }: Props) {
         <PlaylistSongList
           songs={draftPlaylist.songNames}
           songStatuses={songStatuses}
+          runningTimesSeconds={runningTimesSeconds}
           playlistSampleRate={draftPlaylist.sampleRate}
           selectedRow={state.playlistRowSelection}
           onSelectRow={handleSelectRow}
@@ -768,11 +790,21 @@ function ValidationBanner({
 // Ordered song list — center pane
 // ---------------------------------------------------------------------------
 
-const COLS = "grid-cols-[40px_1fr_auto_72px]";
+// Columns: # | Song name | Time | Total | Status pill | Action buttons.
+//   - Time: per-song duration (`mm:ss`)
+//   - Total: cumulative playlist time at the end of this song
+//     (`mm:ss`, or `h:mm:ss` once the running sum exceeds an hour).
+//     Helps the user plan set length without doing the math at each
+//     row — "we'll hit the 30-min mark after Hot Head."
+// Both render "—" for missing / rate-mismatched rows (the per-song
+// duration is unknown or won't actually play, so the cumulative
+// through that row is unknowable too).
+const COLS = "grid-cols-[40px_1fr_56px_72px_auto_72px]";
 
 function PlaylistSongList({
   songs,
   songStatuses,
+  runningTimesSeconds,
   playlistSampleRate,
   selectedRow,
   onSelectRow,
@@ -783,6 +815,12 @@ function PlaylistSongList({
 }: {
   songs: string[];
   songStatuses: SongRowStatus[];
+  /**
+   * Cumulative playlist time through each row in seconds, or `null`
+   * for rows whose contribution is unknown (missing / rate-mismatched
+   * songs). Same length + order as `songs` / `songStatuses`.
+   */
+  runningTimesSeconds: (number | null)[];
   playlistSampleRate: number;
   selectedRow: number | null;
   onSelectRow: (row: number | null) => void;
@@ -854,6 +892,18 @@ function PlaylistSongList({
       >
         <span className="text-right">#</span>
         <span>Song</span>
+        <span
+          className="text-right tabular-nums"
+          title="Song length"
+        >
+          Time
+        </span>
+        <span
+          className="text-right tabular-nums"
+          title="Cumulative playlist time through end of this song"
+        >
+          Total
+        </span>
         <span /> {/* status badge column */}
         <span /> {/* arrows column */}
       </header>
@@ -987,6 +1037,40 @@ function PlaylistSongList({
                   )}
                 >
                   {name}
+                </span>
+                {/* Duration column — shows `m:ss` for ok rows, an em
+                    dash for missing/rate-mismatch rows where the
+                    duration is unknown or wouldn't play anyway. */}
+                <span
+                  className={cn(
+                    "text-right font-mono text-xs tabular-nums",
+                    status.kind === "ok"
+                      ? isSelected
+                        ? "text-brand-700 dark:text-brand-300"
+                        : "text-zinc-500"
+                      : "text-zinc-400 dark:text-zinc-600",
+                  )}
+                >
+                  {status.kind === "ok"
+                    ? formatDuration(status.durationSeconds)
+                    : "—"}
+                </span>
+                {/* Running total — cumulative playlist time through
+                    end of this song. Null for non-ok rows. */}
+                <span
+                  className={cn(
+                    "text-right font-mono text-xs tabular-nums",
+                    runningTimesSeconds[idx] !== null
+                      ? isSelected
+                        ? "text-brand-700 dark:text-brand-300"
+                        : "text-zinc-500"
+                      : "text-zinc-400 dark:text-zinc-600",
+                  )}
+                  title="Cumulative playlist time through end of this song"
+                >
+                  {runningTimesSeconds[idx] !== null
+                    ? formatDuration(runningTimesSeconds[idx]!)
+                    : "—"}
                 </span>
                 <span className="flex justify-end">
                   {status.kind === "missing" && <Tag tone="red">Missing</Tag>}
