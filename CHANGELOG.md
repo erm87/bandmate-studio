@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.9.3] — 2026-05-15
+
+### Documentation
+
+- **BACKLOG** — captured *Planning-docs fast lane — bypass version bump + CHANGELOG entry for backlog / plan edits*: a proposal to relax `check-changelog-entry.mjs` (but not `check-version-sync.mjs`) for changes whose entire file set sits inside a small planning-docs allowlist (`BACKLOG.md`, `docs/HYGIENE-PLAN.md`, `docs/CLEANUP-PLAN.md`, `docs/archive/`), plus a `scripts/update-planning.sh` one-liner that branches, commits, pushes, opens a PR, and enables auto-merge. Motivated by the ~10-minute ceremony cost per backlog entry suppressing intent capture, and by the desire to restore "version bump = shippable change" signal in the tag history. Ordered after Phase H1 of `docs/HYGIENE-PLAN.md` since the scripts being modified don't exist before H1.
+
+### Notes
+
+- Docs-only PR — no behavior change. Patch bump per the project's per-PR bump workflow (the very ceremony this backlog entry proposes relaxing, captured under the existing rules until the proposal itself ships).
+
 ## [0.9.2] — 2026-05-15
 
 ### Documentation

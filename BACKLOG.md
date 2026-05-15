@@ -8,6 +8,61 @@ Newest entries on top.
 
 ---
 
+## Planning-docs fast lane — bypass version bump + CHANGELOG entry for backlog / plan edits
+
+**Where:** `scripts/check-version-sync.mjs` and `scripts/check-changelog-entry.mjs` (the CI gate scripts introduced in Phase H1 of `docs/HYGIENE-PLAN.md`). `.github/workflows/ci.yml` (no change strictly required — the scripts self-skip). New `scripts/update-planning.sh` (the one-liner workflow tool). Update to `docs/HYGIENE-PLAN.md` Phase H1 noting the exception.
+
+**Idea:** Today every change goes through the same per-PR ceremony: branch, bump version, CHANGELOG entry, PR, CI, merge, tag. For *shippable* changes (code, user-visible docs, anything tied to the binary) that ceremony is the right discipline. For *planning surfaces* (`BACKLOG.md`, `docs/HYGIENE-PLAN.md`, `docs/CLEANUP-PLAN.md`, `docs/archive/`) the ceremony is friction without a corresponding safety benefit — these files don't ship in a release, don't affect runtime behavior, and don't need CHANGELOG entries because the user-facing record of what shipped lives in the CHANGELOG itself, not the planning artifacts.
+
+Relax the CI version-checks for planning-only changes and add a one-liner script that handles the whole edit-to-merged cycle for backlog updates.
+
+**Why:** Currently, capturing a single backlog entry costs ~10 minutes of process overhead (branch, two file edits, push, CI wait, merge, tag). That suppresses the very behavior the backlog exists to enable — writing things down when you notice them. The version-tag history is also accumulating bumps that don't correspond to anything shippable (0.8.4 → 0.8.10 in one stretch was mostly repo hygiene + docs); future-you reading `git tag --list` won't be able to tell which versions represent real change from which represent backlog churn. Restoring "version bump = shippable change" signal is its own win.
+
+**Implementation notes:**
+
+- **Single shared allowlist** as a top-of-file constant in both scripts (and in `scripts/update-planning.sh`), so adding a new planning doc only requires editing one list. Initial entries:
+  ```js
+  const PLANNING_PATHS = [
+    "BACKLOG.md",
+    "docs/HYGIENE-PLAN.md",
+    "docs/CLEANUP-PLAN.md",
+    "docs/archive/",  // prefix match — anything archived
+  ];
+  ```
+- **`check-version-sync.mjs`:** keep enforcing across the four versioned files unconditionally. Version-file desync is always a real bug regardless of what triggered the PR, so this check doesn't get an exception. (Cheap to run anyway.)
+- **`check-changelog-entry.mjs`:** before its existing logic runs, gather changed files (`git diff --name-only origin/main...HEAD` in CI; `git diff --name-only HEAD origin/main` for local pre-commit if Phase H5 lands). If every changed path matches an entry in `PLANNING_PATHS` (exact match for files, prefix match for `docs/archive/`-style directory entries), log `"Planning-docs-only change; skipping CHANGELOG entry check."` and exit 0.
+- **Typecheck and tests still run** on every PR, including planning-only ones. They're fast (<30s for both) and the safety net is independent of whether the change is shippable. Skipping the version checks is what removes the actual friction.
+- **`scripts/update-planning.sh`** — collapses the workflow to one command. Takes a commit message arg, assumes one or more planning-allowlist files have uncommitted changes, creates a timestamped branch, commits + pushes, opens a PR with `gh pr create --fill`, marks the PR `--auto`-merge so it merges as soon as CI passes (no second visit required), checks main back out and pulls. Approximate shape:
+  ```bash
+  #!/usr/bin/env bash
+  set -euo pipefail
+  msg="${1:-Update planning docs}"
+  branch="docs/planning-$(date +%s)"
+  git checkout -b "$branch"
+  git add BACKLOG.md docs/HYGIENE-PLAN.md docs/CLEANUP-PLAN.md docs/archive/ 2>/dev/null || true
+  git diff --cached --quiet && { echo "No planning changes staged"; exit 0; }
+  git commit -m "$msg"
+  git push -u origin "$branch"
+  gh pr create --fill --title "$msg" --body "Planning-only change; CI version/changelog checks auto-skip."
+  gh pr merge --squash --delete-branch --auto
+  git checkout main && git pull
+  ```
+- **Refuse to fast-lane if non-planning files are staged.** The script should check the staged-files list against the allowlist and abort with a clear error if anything else slipped in (e.g., the user accidentally also edited `src/`). Guards against the user thinking they made a planning-only edit when they didn't.
+- **`docs/HYGIENE-PLAN.md` Phase H1 update:** under the bullet for `check-version-sync` / `check-changelog-entry`, append: *"Both scripts skip themselves when every changed file matches an entry in the planning-docs allowlist (`BACKLOG.md`, hygiene/cleanup plans, `docs/archive/`). Planning edits don't ship a version and shouldn't be gated on version-metadata consistency. See `scripts/update-planning.sh` for the one-command workflow."*
+
+**Ordering:** ship AFTER Phase H1 of `docs/HYGIENE-PLAN.md` lands. The CI checks the exception modifies don't exist before H1.
+
+**Open questions:**
+
+- **Should `CLAUDE.md` be in the fast-lane allowlist?** Lean **no.** `CLAUDE.md` is read at every Code session start and is load-bearing for contributors; changes to it are meaningfully shippable in the sense that "what Code sessions see" diverges before vs after. Keep it on the ceremony side. Same logic for `README.md`, `docs/SPEC.md`, `docs/ROADMAP.md`, `docs/VERSIONING.md`, `docs/COMPAT-TEST.md`, `docs/EXPORT-PARITY-TEST.md`, `docs/DEV-SETUP.md`, `docs/SMOKE-TEST.md` — all docs that contributors (human or Code) read for normative information. The fast lane is for *intent capture surfaces* (backlog, planning), not *reference docs*.
+- **Should typecheck/tests also skip for planning-only?** Lean **no.** They're fast (~30s combined) and they catch the case where a planning-only PR accidentally includes a code change that didn't get caught by the allowlist filter (a belt-and-suspenders check). The friction we're removing is the *version + CHANGELOG ceremony*, not all CI.
+- **Manual override flag for a "this backlog entry is notable; bump anyway"?** Probably overkill — if you ever want to force a bump for a meaningful planning change, do it manually (edit the version files, add a CHANGELOG entry, skip `update-planning.sh`). The script is the optimization, not the only path.
+- **Should the `update-planning.sh` workflow also support multiple commits per PR?** No. The fast lane is for one-edit-one-PR. If a planning change is big enough to warrant multiple commits, it's big enough to deserve the regular workflow.
+
+**Captured:** 2026-05-14
+
+---
+
 ## USB Export — progress indicator with ETA, cancel, success/error/canceled states
 
 **Where:** `ExportToUsbDialog.tsx` (current "Start export" button + confirm UI). Rust side: `export_to_usb` command in `src-tauri/src/lib.rs` (and likely helpers it calls — check `src-tauri/src/usb.rs` or similar). New event channel from Rust → JS for progress streaming. A new `cancel_export` Tauri command for the cancellation signal.
