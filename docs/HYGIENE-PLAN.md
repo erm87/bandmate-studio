@@ -35,6 +35,7 @@ What it covers: anything that *must pass before merge*. Deterministic, mechanica
 - `cargo check` (catches Rust errors faster than a full build)
 - A `check-version-sync` script that verifies the four version files all show the same version string. Exits non-zero on mismatch.
 - A `check-changelog-entry` script that verifies the current `package.json` version has a corresponding `## [<version>] —` header in `CHANGELOG.md` that isn't sitting under `## [Unreleased]`. Exits non-zero on mismatch.
+- **Planning-docs fast-lane exception (`check-changelog-entry` only).** The CHANGELOG-entry script skips itself when every changed file matches an entry in the planning-docs allowlist (`BACKLOG.md`, hygiene/cleanup plans, `docs/archive/`). Planning edits don't ship a version and shouldn't be gated on version-metadata consistency. `check-version-sync` stays strict — version-file desync is always a real bug regardless of the trigger. See `scripts/update-planning.sh` for the one-command workflow, and `scripts/lib/planning-paths.mjs` for the shared allowlist.
 - **Codec round-trip rule.** If the PR touches `src/codec/{jcm,jcs,jcp}.ts`, the vitest fixture suite must pass *and* no test should have been modified to make it pass. The fixtures are the contract — this is mostly a code-review discipline rather than an automatable check, but call it out as a CI-gated invariant.
 
 Implementation: GitHub Actions workflow at `.github/workflows/ci.yml`. Mark `main` as protected with the CI workflow as a required check so PRs can't merge red.

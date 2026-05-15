@@ -6,6 +6,20 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 
 ## [Unreleased]
 
+## [0.9.4] — 2026-05-15
+
+### Added
+
+- **`scripts/update-planning.sh`** — one-command workflow for planning-doc edits (`BACKLOG.md`, `docs/HYGIENE-PLAN.md`, `docs/CLEANUP-PLAN.md`, `docs/archive/`). Validates the allowlist, opens a PR, and enables auto-merge. Supports `--dry-run`. Allowlist is shared via the new `scripts/lib/planning-paths.mjs` module.
+
+### Changed
+
+- **`check-changelog-entry.mjs`** — now self-skips when every changed file against `origin/main` matches the planning-docs allowlist, with a defensive fall-through to the strict check if the git diff is unavailable. `check-version-sync.mjs` stays strict regardless.
+
+### Notes
+
+- Dev-tooling only — no user-visible app behavior change. Patch bump per the per-PR workflow; the BACKLOG entry that proposed this fast lane has been removed from the active list and now ships as documented in `docs/HYGIENE-PLAN.md` Phase H1.
+
 ## [0.9.3] — 2026-05-15
 
 ### Documentation

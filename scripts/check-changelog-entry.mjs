@@ -34,12 +34,37 @@
 import { readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { execSync } from "node:child_process";
+import { isPlanningOnlyDiff } from "./lib/planning-paths.mjs";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(__dirname, "..");
 
 const PACKAGE_JSON = resolve(repoRoot, "package.json");
 const CHANGELOG = resolve(repoRoot, "CHANGELOG.md");
+
+// Planning-docs fast lane: if every file changed against origin/main is on
+// the planning allowlist, skip the CHANGELOG-entry check. See BACKLOG.md
+// entry "Planning-docs fast lane" and docs/HYGIENE-PLAN.md Phase H1.
+//
+// Defensive: if the git command fails (no origin/main, shallow clone with
+// no fetch, etc.) we fall through to the strict check rather than skipping.
+// Better to false-positive enforce than to skip when we can't tell.
+try {
+  const out = execSync("git diff --name-only origin/main...HEAD", {
+    cwd: repoRoot,
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"],
+  });
+  const changed = out.split("\n").map((l) => l.trim()).filter(Boolean);
+  if (isPlanningOnlyDiff(changed)) {
+    console.log("check:changelog — Planning-docs-only change; skipping CHANGELOG entry check.");
+    process.exit(0);
+  }
+} catch {
+  // Couldn't determine the diff (e.g. origin/main missing in a shallow
+  // checkout). Fall through to the strict check below.
+}
 
 const pkg = JSON.parse(readFileSync(PACKAGE_JSON, "utf8"));
 const version = pkg.version;

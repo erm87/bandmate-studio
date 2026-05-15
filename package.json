@@ -1,7 +1,7 @@
 {
   "name": "bandmate-studio",
   "private": true,
-  "version": "0.9.3",
+  "version": "0.9.4",
   "type": "module",
   "description": "Modern replacement for JoeCo's BM Loader companion app for the BandMate hardware.",
   "scripts": {
