@@ -55,7 +55,10 @@ pnpm typecheck          # tsc --noEmit; project also runs `tsc -b` in `pnpm buil
 pnpm bump:patch|minor|major   # see docs/VERSIONING.md — must run before each merge
 pnpm check:versions     # verify the four version files agree (CI runs this on every PR)
 pnpm check:changelog    # verify CHANGELOG has a non-Unreleased entry for the current version
+scripts/update-planning.sh "msg"   # fast-lane backlog/plan edits — branch + PR + auto-merge, no version bump
 ```
+
+`scripts/update-planning.sh` skips the version-bump/CHANGELOG ceremony for edits limited to the planning allowlist (`BACKLOG.md`, `docs/HYGIENE-PLAN.md`, `docs/CLEANUP-PLAN.md`, `docs/archive/`). Anything else still goes through the regular per-PR workflow.
 
 Vitest is configured for Node environment (codec is pure-functional and DOM-free). There is no JS lint step. The Rust side has no separate test command — `cargo test` is available but not currently wired into scripts.
 
