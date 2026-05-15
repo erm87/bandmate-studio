@@ -8,6 +8,97 @@ Newest entries on top.
 
 ---
 
+## USB Export — progress indicator with ETA, cancel, success/error/canceled states
+
+**Where:** `ExportToUsbDialog.tsx` (current "Start export" button + confirm UI). Rust side: `export_to_usb` command in `src-tauri/src/lib.rs` (and likely helpers it calls — check `src-tauri/src/usb.rs` or similar). New event channel from Rust → JS for progress streaming. A new `cancel_export` Tauri command for the cancellation signal.
+
+**Idea:** The current export dialog dismisses or freezes once the user clicks **Start export**, with no feedback on what's happening. For a band copying their working folder (often 5-50 GB) to a USB stick before a show, this is the highest-stakes operation in the whole app and currently feels like the UI hung. Replace the post-click silence with a proper progress state machine: in-progress UI with bytes-based progress bar + ETA + current file + cancel button, followed by an explicit Success / Error / Canceled terminal state.
+
+**Why:** USB writes take real time (consumer sticks at 20-100 MB/s; 10-min exports aren't unusual). Without feedback the user can't distinguish "running normally" from "stuck"; some will assume the worst and kill the app mid-write, which is the actual recipe for corrupting the export. A trustworthy progress indicator turns the long wait into a reassuring one, and a working cancel button gives the user the safe escape hatch they'd otherwise reach for by force-quitting. Both reduce the chance of shipping a broken stick to a show.
+
+**State machine (replaces the current "Start export → dialog dismisses" flow):**
+
+1. **Pre-export (current confirm step).** Existing UI with destination + summary. **Add pre-flight checks** before transitioning to in-progress: USB mount still present, USB writable (write+delete a small probe file), enough free space (sum of file sizes BMS plans to copy ≤ available on stick, with a small safety margin — 10 MB is fine). Failures here surface as inline errors on the confirm dialog with the specific remediation ("USB is full — N MB needed, M MB available") and keep the user on the confirm step.
+
+2. **In-progress.** Replace the confirm content with the progress UI. Persistent header with destination path. Body:
+   - **Progress bar** showing bytes copied / total bytes (not file count — files vary in size from KB `.jcs` files to multi-MB WAVs, so bytes give a smooth honest indicator).
+   - **Percentage** (numeric, integer percent) next to the bar.
+   - **ETA** shown as "About 2 minutes remaining" using a rolling 5-second-window byte rate. For the first 3 seconds OR first 5% (whichever comes first), show "Calculating…" — the first second of a USB write is unreliable due to cache warming and shouldn't drive an estimate the user will trust.
+   - **Current file** ("Copying: ClickCues_buffy.wav") on a third line. Truncate-with-tooltip if it overflows.
+   - **Cancel** button (primary placement; not destructive — the destructive intent is implicit in canceling).
+   - **No close-X on the dialog header** during in-progress; the only ways out are Cancel or completion.
+   - Optional: show a small `n / m files` counter alongside as a secondary signal — some users read file counts more naturally than bytes.
+
+3. **Success.** Terminal state with a green checkmark or similar affirmative glyph. Body summarizes what landed on the stick:
+   - `N songs added, M songs updated` (added = didn't exist on the stick before; updated = existed but the BMS-side content was newer or different)
+   - `N playlists added, M playlists updated`
+   - `N trackmaps added, M trackmaps updated`
+   - Total bytes copied, total elapsed time as a footer line ("Copied 4.2 GB in 3 minutes 18 seconds")
+   - **Done** button (primary), and optionally **Eject USB** (tertiary) if the existing `eject_volume` command can run from here — saves the user a Finder trip.
+
+4. **Error.** Terminal state with a warning/error glyph. Body shows:
+   - One-sentence summary ("USB write failed at file 12 of 47.")
+   - Specific error details from the underlying Rust error (path, OS errno, etc.) in a smaller second block. Readable but not the headline.
+   - **State of the USB** disclosed honestly ("Partial copy on USB. N files written before the error. The stick may not play correctly until you re-run the export or restore from backup.")
+   - **Retry** button if the failure is transient (write timeout, USB temporarily unavailable). **Close** button to dismiss.
+
+5. **Canceling (transient).** When the user clicks Cancel during step 2, show a short "Canceling…" state while the Rust side stops accepting new writes and performs whatever cleanup the cancellation policy demands (see Open Questions). Disable the Cancel button so a second click doesn't double-signal.
+
+6. **Canceled.** Terminal state after cleanup completes. Body explains what state the USB is in (see Open Questions for the policy choice — every option needs honest copy here). **Close** button.
+
+**Progress measurement (Rust → JS event channel):**
+
+- Tauri's `Window.emit("export-progress", payload)` from Rust to stream events. JS subscribes via `listen("export-progress", handler)` in the dialog's mount effect, unsubscribes on unmount.
+- Payload shape: `{ bytesCopied: number, bytesTotal: number, currentFile: string, filesCompleted: number, filesTotal: number }`. Emitted once per file boundary (cheap) — sub-file progress is overkill for files in the typical few-MB range and would flood the channel.
+- For huge files (say >100 MB) consider emitting mid-file progress at 25/50/75% via the `copy_into_folder` helper. Defer until field testing surfaces a need.
+- Terminal events on a separate channel: `export-complete` with the result summary, `export-error` with the error details. Keeps the in-progress channel simple.
+
+**Cancellation signal:**
+
+- New `cancel_export` Tauri command. Frontend invokes it on Cancel click.
+- Rust side holds an `Arc<AtomicBool>` (or a `tokio::sync::watch` channel if the export becomes async) that the file-copy loop checks between file iterations. On detect, break the loop and run cleanup per the chosen policy.
+- Important: cancellation should be cooperative, not preemptive. Don't kill the export thread mid-`fs::copy()` — that's how you get truncated files on the USB. Check the flag between files only.
+
+**Implementation notes:**
+
+- Pre-flight checks should run in a single Rust command (`prepare_export` or similar) that returns either a success token with the pre-flight summary or a typed error the dialog renders. Keeping all the FS calls on the Rust side avoids the dialog doing multiple round-trips.
+- The "added vs updated" distinction in the success summary requires the export to track per-file outcomes during the run (was the target path newly created, or did it overwrite an existing file with different content?). Compute this on the Rust side and include in the `export-complete` payload — much easier than recomputing on the JS side.
+- USB free-space check: `sysinfo` (already a dep for the USB enumeration) exposes `available_space` per disk. Cross-check sums in bytes before starting; surface a `not_enough_space` typed error with both numbers in the payload.
+- The progress UI should follow the existing dialog visual family (`CleanupConfirmDialog`, `SaveConfirmDialog`, `SmartImportConfirmDialog`). New `ExportProgressDialog.tsx` (or fold the new states into `ExportToUsbDialog.tsx` if it stays manageable — probably split, the state machine is meaty).
+- ETA computation in JS, not Rust — JS keeps a sliding window of recent `(elapsedMs, bytesCopied)` samples from the progress events and computes a rate from the last ~5 seconds. Pure UI concern; doesn't need to round-trip to Rust.
+- Toast on dialog close: when Success / Error / Canceled terminal states are dismissed, fire a single-slot toast on the editor pane summarizing the outcome ("Exported 4.2 GB to /Volumes/BANDMATE"). Lets the user close the dialog and still see the confirmation. Reuses the existing `Toast` component.
+
+**Open questions:**
+
+- **Cancellation policy — what does "revert to pre-export state" actually mean?** Three options, increasing in complexity and in user-experience quality:
+  - **(a) Best-effort, no rollback.** Cancel stops new writes; whatever was already on the USB stays. Canceled-state copy: "Export was canceled. N files were already written. The stick may be in an inconsistent state — re-run the export or restore from backup."
+  - **(b) Delete-new-files cleanup.** Track which files on the USB were *newly created* by this export (not pre-existing). On cancel, delete those. Files that were *overwritten* during this export remain in their new state (we don't have the old content to restore). Canceled-state copy: "Export was canceled. New files have been removed from the USB. Files that were updated during the export remain at their new state — re-run the export to fully sync, or restore from backup."
+  - **(c) Staged copy + atomic swap.** Write everything to a temporary directory on the USB first (e.g. `.bm_export_staging/`), then atomic-rename into place at the end of a successful export. Cancellation = delete the staging directory; pre-export USB content is untouched. Cleanest semantics but requires ~2× the export's disk space on the USB temporarily. Some USB stick filesystems (exFAT, FAT32) may not support truly atomic directory renames — needs a Rust-side test.
+
+  Eric's stated requirement is "revert to the state before the export started." That points at (c) as the only fully-honest interpretation. Likely path: ship (b) as v1 (matches the requirement *for the common case where the user is exporting to a fresh stick*) with the honest "files that were updated remain at their new state" caveat; consider (c) as a future enhancement once the rest of the state machine is field-tested.
+
+- **What happens if the USB is unplugged mid-export?** Treat as an error state with specific copy ("USB drive disconnected during export. The stick is in an inconsistent state."). Don't try to recover or wait for re-mount; the user re-runs the export. Detect via OS-level error from the write call, surface immediately. Optional polish: a background heartbeat that checks the mount every few seconds and surfaces the error sooner than the next file write would.
+
+- **What about the `dot_clean -m` step?** Existing export pipeline runs this after the copy to strip AppleDouble files. Should it fire mid-cancel (yes, even partial exports want the stripping) or only on success (no — partial-with-AppleDouble is still wrong)? Probably run unconditionally on any cleanup path that leaves files on the stick.
+
+- **Should the progress bar animate during pre-flight?** Pre-flight is usually subsecond — probably no UI for it. If a check turns out to be slow (free-space on a large stick can take a moment), upgrade to a tiny "Checking USB…" inline indicator before the in-progress UI takes over.
+
+- **Persistence of the dialog through app focus changes:** if the user clicks away to another window during the export, the dialog should stay open in the background. Don't auto-dismiss on blur. (Default behavior, but worth confirming.)
+
+**Phased proposal:**
+
+This entry is big enough to ship in two or three PRs rather than one:
+
+1. **PR 1 — Rust progress events + JS in-progress UI.** Pre-flight, progress bar, ETA, current-file display. Cancel button shows but invokes a placeholder that just stops new writes (cancellation policy (a) — no cleanup). Terminal Success / Error states with the summary copy. No revert yet.
+2. **PR 2 — Cancellation policy (b).** Track newly-created files; delete on cancel. Canceled terminal state with honest copy.
+3. **PR 3 (optional, defer) — Staged-copy policy (c).** Only if (b) feels insufficient in practice. Likely a follow-up after field use.
+
+Ship PR 1 first — that's where the bulk of user value is (the "is it hung?" anxiety is solved). PRs 2 and 3 are quality polish on top.
+
+**Captured:** 2026-05-14
+
+---
+
 ## Sidebar — keyboard arrow navigation when no editor sub-selection is active
 
 **Where:** Top-level keyboard handler in `App.tsx` (lives next to the existing ESC handler that clears editor sub-selections before falling back to clearing the sidebar selection). `Sidebar.tsx` exposes the ordered lists of songs / playlists / track maps. `AppState` already owns `sidebarSelection` (kind + value) and the editor sub-selections (`channelSelection`, `playlistRowSelection`).
